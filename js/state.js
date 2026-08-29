@@ -9,7 +9,8 @@ window.State = (function(){
     // Phase 1 (shared-expenses foundation) — loaded for future phases; no page reads these yet.
     users: [],
     groups: [],
-    groupMembers: []
+    groupMembers: [],
+    settlements: []
   };
   const listeners = [];
 
@@ -22,6 +23,7 @@ window.State = (function(){
     data.users = S.read(S.KEYS.users, []);
     data.groups = S.read(S.KEYS.groups, []);
     data.groupMembers = S.read(S.KEYS.groupMembers, []);
+    data.settlements = S.read(S.KEYS.settlements, []);
   }
 
   function persist(key){
@@ -173,11 +175,12 @@ window.State = (function(){
     if(id === S.PERSONAL_GROUP_ID) return; // never delete the implicit Personal group
     data.groups = data.groups.filter(g=>g.id!==id);
     data.groupMembers = data.groupMembers.filter(m=>m.groupId!==id);
+    data.settlements = data.settlements.filter(s=>s.groupId!==id);
     if(activeGroupId() === id){
       data.settings.activeGroupId = S.PERSONAL_GROUP_ID;
       persist('settings');
     }
-    persist('groups'); persist('groupMembers');
+    persist('groups'); persist('groupMembers'); persist('settlements');
     notify();
   }
   function addGroupMember(groupId, displayName){
@@ -192,10 +195,13 @@ window.State = (function(){
     notify();
     return member;
   }
+  // Phase 4: soft-delete. The GroupMember row is kept forever (with removedAt
+  // set) so historical paidBy/split references for this member can always be
+  // resolved. Existing records without removedAt are implicitly active.
   function removeGroupMember(memberId){
     const member = data.groupMembers.find(m=>m.id===memberId);
     if(!member || member.role === 'owner') return; // owner can't be removed via this action
-    data.groupMembers = data.groupMembers.filter(m=>m.id!==memberId);
+    member.removedAt = new Date().toISOString();
     const group = data.groups.find(g=>g.id===member.groupId);
     if(group) group.memberIds = group.memberIds.filter(uid=>uid!==member.userId);
     persist('groupMembers'); persist('groups');
@@ -204,7 +210,37 @@ window.State = (function(){
   function groupById(id){ return data.groups.find(g=>g.id===id); }
   function userById(id){ return data.users.find(u=>u.id===id); }
   function userName(id){ const u = userById(id); return u ? u.displayName : 'Unknown'; }
-  function membersForGroup(groupId){ return data.groupMembers.filter(m=>m.groupId===groupId); }
+  // Active members only — used everywhere a NEW selection is being made
+  // (Paid By / Split checkboxes on the Add/Edit expense form, the Groups
+  // page's member list). Pass includeRemoved:true for anything that needs to
+  // resolve or display historical data (balances, an expense already
+  // referencing a removed member).
+  function membersForGroup(groupId, opts){
+    const all = data.groupMembers.filter(m=>m.groupId===groupId);
+    if(opts && opts.includeRemoved) return all;
+    return all.filter(m=>!m.removedAt);
+  }
+  // Phase 4: members shaped for Balances.balancesForGroup — resolves displayName
+  // so callers never have to do that mapping themselves. Always includes removed
+  // members, since balances must be able to show/settle them.
+  function membersForBalances(groupId){
+    return membersForGroup(groupId, {includeRemoved:true}).map(m => ({
+      id: m.id, userId: m.userId, displayName: userName(m.userId), removed: !!m.removedAt
+    }));
+  }
+
+  // ---- Settlements (Phase 4) ----
+  function addSettlement(settlement){
+    settlement.id = Utils.uid('settle');
+    settlement.createdAt = new Date().toISOString();
+    data.settlements.push(settlement);
+    persist('settlements');
+    notify();
+    return settlement;
+  }
+  function getSettlementsForGroup(groupId){
+    return data.settlements.filter(s=>s.groupId===groupId);
+  }
 
   // Phase 3: the single, centralized place every page reads group-scoped expenses
   // from — so "an expense in Family never appears in Personal" is enforced once,
@@ -244,7 +280,8 @@ window.State = (function(){
     addRecurring, deleteRecurring, updateRecurring,
     setSetting, replaceAll, clearAll,
     activeGroupId, setActiveGroup, addGroup, renameGroup, deleteGroup,
-    addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup,
-    getExpensesForGroup, getExpensesForMonth
+    addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup, membersForBalances,
+    getExpensesForGroup, getExpensesForMonth,
+    addSettlement, getSettlementsForGroup
   };
 })();

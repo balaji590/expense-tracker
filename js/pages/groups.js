@@ -51,6 +51,7 @@ window.Pages.groups = (function(){
           </div>
           <div class="row-actions">
             ${!isActive ? `<button class="btn btn-sm" data-setactive="${group.id}">Set active</button>` : ''}
+            ${!isPersonal ? `<button class="btn btn-sm" data-viewbalances="${group.id}">View balances</button>` : ''}
             ${!isPersonal ? `<button class="btn btn-sm" data-rename="${group.id}">Rename</button>` : ''}
             ${!isPersonal ? `<button class="btn btn-sm btn-danger" data-delgroup="${group.id}">Delete</button>` : ''}
           </div>
@@ -116,6 +117,12 @@ window.Pages.groups = (function(){
     const setActiveBtn = container.querySelector(`[data-setactive="${group.id}"]`);
     if(setActiveBtn) setActiveBtn.onclick = ()=>{ State.setActiveGroup(group.id); Toast.show(`${group.name} is now active`); };
 
+    const viewBalancesBtn = container.querySelector(`[data-viewbalances="${group.id}"]`);
+    if(viewBalancesBtn) viewBalancesBtn.onclick = ()=>{
+      State.setActiveGroup(group.id);
+      location.hash = '#/settle-up';
+    };
+
     const renameBtn = container.querySelector(`[data-rename="${group.id}"]`);
     if(renameBtn) renameBtn.onclick = ()=> openRenameModal(group);
 
@@ -137,9 +144,27 @@ window.Pages.groups = (function(){
         const memberId = btn.getAttribute('data-removemember');
         const member = State.membersForGroup(group.id).find(m=>m.id===memberId);
         const name = member ? State.userName(member.userId) : 'this member';
+
+        // Balance-aware warning: only shown here, in the removal confirmation
+        // itself — never as a passive indicator elsewhere on this page.
+        let warningBody = 'They will no longer be part of this group. Past expenses are not affected.';
+        if(member){
+          const allMembers = State.membersForBalances(group.id);
+          const expenses = State.getExpensesForGroup(group.id);
+          const settlements = State.getSettlementsForGroup(group.id);
+          const balances = Balances.balancesForGroup(allMembers, expenses, settlements);
+          const bal = balances.find(b=>b.memberId===memberId);
+          if(bal && bal.balancePaise !== 0){
+            const balText = bal.balancePaise > 0
+              ? `is owed ${U.fmtMoney(bal.balance)}`
+              : `owes ${U.fmtMoney(Math.abs(bal.balance))}`;
+            warningBody = `${U.escapeHtml(name)} currently ${balText} in this group. You can still settle this from Settle Up after removing them. Past expenses are not affected.`;
+          }
+        }
+
         Modal.confirm({
           title: `Remove ${U.escapeHtml(name)}?`,
-          body: 'They will no longer be part of this group. Past expenses are not affected.',
+          body: warningBody,
           confirmText: 'Remove', danger: true,
           onConfirm: ()=>{ State.removeGroupMember(memberId); Toast.show('Member removed'); }
         });

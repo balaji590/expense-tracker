@@ -10,6 +10,23 @@ window.Pages.expenses = (function(){
     return State.activeGroupId() !== Storage.PERSONAL_GROUP_ID;
   }
 
+  // New expenses only ever offer active members. Editing an expense that
+  // already references a removed member (as paidBy or in a split) must still
+  // show that member so the historical value displays and saves correctly —
+  // it's just not offered as a NEW selection for anyone else.
+  function resolveMembersForForm(groupId, existing){
+    const active = State.membersForGroup(groupId);
+    if(!existing) return active;
+    const all = State.membersForGroup(groupId, {includeRemoved:true});
+    const referencedMemberIds = new Set((existing.splits||[]).map(s=>s.memberId));
+    const extra = all.filter(m => m.removedAt && (m.userId === existing.paidBy || referencedMemberIds.has(m.id)));
+    return [...active, ...extra];
+  }
+
+  function memberDisplayName(st, m){
+    return st.userName(m.userId) + (m.removedAt ? ' (removed)' : '');
+  }
+
   // ---------------------------------------------------------------------
   // Render: month navigator + monthly summary + category strip + filters
   // ---------------------------------------------------------------------
@@ -302,7 +319,7 @@ window.Pages.expenses = (function(){
     const e = existing || prefill || {};
     const shared = isSharedActive();
     const groupId = st.activeGroupId();
-    const members = shared ? st.membersForGroup(groupId) : [];
+    const members = shared ? resolveMembersForForm(groupId, existing) : [];
 
     return `
       <div class="modal-title">${existing? 'Edit expense':'Add expense'}</div>
@@ -366,7 +383,7 @@ window.Pages.expenses = (function(){
         <div class="field">
           <label>Paid by</label>
           <select id="expPaidBy">
-            ${members.map(m=>`<option value="${m.userId}" ${paidBy===m.userId?'selected':''}>${U.escapeHtml(st.userName(m.userId))}</option>`).join('')}
+            ${members.map(m=>`<option value="${m.userId}" ${paidBy===m.userId?'selected':''}>${U.escapeHtml(memberDisplayName(st, m))}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -398,7 +415,7 @@ window.Pages.expenses = (function(){
           ${members.map((m,i)=>`
             <label style="display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:500; margin-bottom:6px; cursor:pointer;">
               <input type="checkbox" data-split-member="${m.id}" style="width:auto;" ${defaultChecked[i]?'checked':''}>
-              ${U.escapeHtml(st.userName(m.userId))}
+              ${U.escapeHtml(memberDisplayName(st, m))}
               <span class="stat-sub" data-split-preview="${m.id}" style="margin-left:auto;"></span>
             </label>
           `).join('')}
@@ -413,7 +430,7 @@ window.Pages.expenses = (function(){
         <label>Custom amounts</label>
         ${members.map(m=>`
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <span style="flex:1; font-size:13.5px; font-weight:500;">${U.escapeHtml(st.userName(m.userId))}</span>
+            <span style="flex:1; font-size:13.5px; font-weight:500;">${U.escapeHtml(memberDisplayName(st, m))}</span>
             <input type="number" min="0" step="0.01" data-split-amount="${m.id}" value="${existingByMember[m.id]!==undefined ? existingByMember[m.id] : ''}" style="width:120px;" placeholder="0.00">
           </div>
         `).join('')}
@@ -482,8 +499,8 @@ window.Pages.expenses = (function(){
 
   function bindForm(existingId){
     const shared = isSharedActive();
-    const members = shared ? State.membersForGroup(State.activeGroupId()) : [];
     const existing = existingId ? State.data.expenses.find(x=>x.id===existingId) : null;
+    const members = shared ? resolveMembersForForm(State.activeGroupId(), existing) : [];
 
     if(shared){
       bindSplitBuilder(members, existing ? existing.splitType : 'none', existing ? existing.splits : []);
