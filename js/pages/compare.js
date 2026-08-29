@@ -6,7 +6,7 @@ window.Pages.compare = (function(){
 
   function render(container){
     const st = State;
-    const allKeys = [...new Set(st.data.expenses.map(e=>U.monthKey(e.date)))];
+    const allKeys = [...new Set(State.getExpensesForGroup(State.activeGroupId()).map(e=>U.monthKey(e.date)))];
     allKeys.push(U.monthKey(new Date()));
     const uniqueKeys = [...new Set(allKeys)].sort().reverse();
 
@@ -35,8 +35,9 @@ window.Pages.compare = (function(){
 
   function renderBody(container){
     const st = State;
-    const expA = C.expensesForMonth(st.data.expenses, keyA);
-    const expB = C.expensesForMonth(st.data.expenses, keyB);
+    const activeExpenses = State.getExpensesForGroup(State.activeGroupId());
+    const expA = C.expensesForMonth(activeExpenses, keyA);
+    const expB = C.expensesForMonth(activeExpenses, keyB);
     const totalA = C.total(expA), totalB = C.total(expB);
     const diff = totalB - totalA;
     const pct = U.pctChange(totalB, totalA);

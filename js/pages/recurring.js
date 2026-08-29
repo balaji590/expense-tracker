@@ -52,7 +52,11 @@ window.Pages.recurring = (function(){
     card.querySelectorAll('[data-pay]').forEach(b=>{
       b.onclick = ()=>{
         const r = st.data.recurring.find(x=>x.id===b.getAttribute('data-pay'));
-        st.addExpense({ name:r.name, amount:r.amount, category:r.category, date:new Date().toISOString(), paymentMethod:'Bank Transfer', notes:'Recurring expense', tags:['recurring'] });
+        st.addExpense({
+          name:r.name, amount:r.amount, category:r.category, date:new Date().toISOString(),
+          paymentMethod:'Bank Transfer', notes:'Recurring expense', tags:['recurring'],
+          groupId: st.activeGroupId(), addedBy: Storage.PERSONAL_USER_ID
+        });
         const next = advanceDate(r.nextDueDate, r.frequency);
         st.updateRecurring(r.id, {nextDueDate: next});
         Toast.show('Expense logged from recurring item');

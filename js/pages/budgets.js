@@ -5,12 +5,13 @@ window.Pages.budgets = (function(){
   function render(container){
     const st = State;
     const curKey = U.monthKey(new Date());
-    const curExp = C.expensesForMonth(st.data.expenses, curKey);
+    const activeExpenses = State.getExpensesForGroup(State.activeGroupId());
+    const curExp = C.expensesForMonth(activeExpenses, curKey);
     const curTotal = C.total(curExp);
     const byCat = C.byCategory(curExp);
     const overall = st.data.budgets.overall;
     const overallStatus = C.budgetStatus(curTotal, overall);
-    const suggestions = C.buildSavingSuggestions(st);
+    const suggestions = C.buildSavingSuggestions(st, activeExpenses);
 
     container.innerHTML = `
       <div class="section-head"><h2>Budgets — ${U.monthLabel(curKey)}</h2></div>

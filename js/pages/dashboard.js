@@ -118,7 +118,7 @@ window.Pages.dashboard = (function(){
     }
 
     // Insights
-    const insights = C.buildInsights(st);
+    const insights = C.buildInsights(st, all);
     const glance = [
       topCat ? `Top category: <b>${U.escapeHtml(st.categoryName(topCat.category))}</b>` : null,
       `Transactions this month: <b>${curExp.length}</b>`,

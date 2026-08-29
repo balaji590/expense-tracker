@@ -70,13 +70,13 @@ window.Calc = (function(){
   }
 
   // ---- Insights (rule based) ----
-  function buildInsights(state){
+  function buildInsights(state, expenses){
     const insights = [];
     const now = new Date();
     const curKey = U.monthKey(now);
     const prevKey = U.prevMonthKey(curKey);
-    const curExp = expensesForMonth(state.data.expenses, curKey);
-    const prevExp = expensesForMonth(state.data.expenses, prevKey);
+    const curExp = expensesForMonth(expenses, curKey);
+    const prevExp = expensesForMonth(expenses, prevKey);
     if(curExp.length === 0) return insights;
 
     const curTotal = total(curExp), prevTotal = total(prevExp);
@@ -118,12 +118,12 @@ window.Calc = (function(){
   }
 
   // "Where can I spend less" — suggests trimming categories that grew a lot or sit above their typical share
-  function buildSavingSuggestions(state){
+  function buildSavingSuggestions(state, expenses){
     const now = new Date();
     const curKey = U.monthKey(now);
     const prevKey = U.prevMonthKey(curKey);
-    const curExp = expensesForMonth(state.data.expenses, curKey);
-    const prevExp = expensesForMonth(state.data.expenses, prevKey);
+    const curExp = expensesForMonth(expenses, curKey);
+    const prevExp = expensesForMonth(expenses, prevKey);
     if(curExp.length < 3) return {items:[], totalSaving:0};
 
     const curByCat = byCategory(curExp);
