@@ -5,8 +5,21 @@ window.Storage = (function(){
     categories: 'et_categories',
     budgets: 'et_budgets',
     recurring: 'et_recurring',
-    settings: 'et_settings'
+    settings: 'et_settings',
+    // Phase 1 (shared-expenses foundation) — data-layer only, no UI reads/writes these yet.
+    users: 'et_users',
+    groups: 'et_groups',
+    groupMembers: 'et_group_members',
+    migrationState: 'et_migration_state',
+    migrationBackup: 'et_migration_backup'
   };
+
+  // Fixed, well-known IDs for the single implicit personal user/group/membership.
+  // Using fixed IDs (rather than random uids) keeps the migration trivially idempotent:
+  // "does a record with this exact ID already exist?" instead of fuzzy matching.
+  const PERSONAL_USER_ID = 'user_local';
+  const PERSONAL_GROUP_ID = 'group_personal';
+  const PERSONAL_MEMBER_ID = 'member_local';
 
   const DEFAULT_CATEGORIES = [
     {id:'cat_food', name:'Food', color:'#e0704a', icon:'F'},
@@ -70,9 +83,93 @@ window.Storage = (function(){
     if(localStorage.getItem(KEYS.settings) === null){
       write(KEYS.settings, {theme:'light', currency:'INR'});
     }
+    // Runs last, after all existing defaults are in place, so a brand-new install's
+    // seeded demo expenses get backfilled exactly like a returning user's real data.
+    runPhase1Migration();
+  }
+
+  // ------------------------------------------------------------------
+  // Phase 1 migration: shared-expenses data-model foundation.
+  //
+  // Creates exactly one hidden Personal User/Group/GroupMember, and backfills
+  // every existing expense with groupId/addedBy/paidBy/splitType/splits.
+  // Never touches categories/budgets/recurring/settings. Never removes or
+  // overwrites any existing expense field. Safe to call on every app load —
+  // every step below checks "does this already exist?" before creating
+  // anything, so re-running is a no-op once migration has completed.
+  // ------------------------------------------------------------------
+  function runPhase1Migration(){
+    try{
+      const state = read(KEYS.migrationState, null);
+      if(state && state.phase1Complete) return; // already migrated — nothing to do
+
+      // Snapshot the exact pre-migration expenses array once, before any mutation,
+      // so existing data is always recoverable if anything below goes wrong.
+      // Only written if it doesn't already exist, so a retry after a partial
+      // failure never overwrites the original snapshot with already-modified data.
+      if(localStorage.getItem(KEYS.migrationBackup) === null){
+        const rawExpenses = localStorage.getItem(KEYS.expenses);
+        write(KEYS.migrationBackup, {
+          version: 1,
+          createdAt: new Date().toISOString(),
+          expenses: rawExpenses === null ? null : JSON.parse(rawExpenses)
+        });
+      }
+
+      // User — idempotent by fixed ID, never duplicated.
+      const users = read(KEYS.users, []);
+      if(!users.some(u => u.id === PERSONAL_USER_ID)){
+        users.push({ id: PERSONAL_USER_ID, displayName: 'Me', createdAt: new Date().toISOString() });
+        write(KEYS.users, users);
+      }
+
+      // Group — idempotent by fixed ID.
+      const groups = read(KEYS.groups, []);
+      if(!groups.some(g => g.id === PERSONAL_GROUP_ID)){
+        groups.push({
+          id: PERSONAL_GROUP_ID, name: 'Personal', type: 'personal',
+          memberIds: [PERSONAL_USER_ID], createdBy: PERSONAL_USER_ID,
+          createdAt: new Date().toISOString()
+        });
+        write(KEYS.groups, groups);
+      }
+
+      // GroupMember — idempotent by fixed ID.
+      const members = read(KEYS.groupMembers, []);
+      if(!members.some(m => m.id === PERSONAL_MEMBER_ID)){
+        members.push({
+          id: PERSONAL_MEMBER_ID, groupId: PERSONAL_GROUP_ID, userId: PERSONAL_USER_ID,
+          role: 'owner', joinedAt: new Date().toISOString()
+        });
+        write(KEYS.groupMembers, members);
+      }
+
+      // Expenses — backfill each new field independently and only if missing,
+      // so existing name/amount/date/category/paymentMethod/notes/tags/id/isDemo
+      // are never touched, and partially-migrated or corrupted-but-present
+      // records are handled field-by-field rather than all-or-nothing.
+      const expenses = read(KEYS.expenses, []);
+      expenses.forEach(exp => {
+        if(!exp || typeof exp !== 'object') return; // skip anything unexpected rather than throwing
+        if(exp.groupId === undefined) exp.groupId = PERSONAL_GROUP_ID;
+        if(exp.addedBy === undefined) exp.addedBy = PERSONAL_USER_ID;
+        if(exp.paidBy === undefined) exp.paidBy = PERSONAL_USER_ID;
+        if(exp.splitType === undefined) exp.splitType = 'none';
+        if(exp.splits === undefined) exp.splits = [];
+      });
+      write(KEYS.expenses, expenses);
+
+      write(KEYS.migrationState, { phase1Complete: true, migratedAt: new Date().toISOString() });
+    }catch(e){
+      // Fail safe: never let a migration error break app startup, and never
+      // mark migration complete if something went wrong — it will simply
+      // retry (safely — every step above is idempotent) on the next load.
+      if(window.console && console.warn) console.warn('Phase 1 migration did not complete cleanly:', e);
+    }
   }
 
   return {
-    KEYS, DEFAULT_CATEGORIES, init, read, write
+    KEYS, DEFAULT_CATEGORIES, PERSONAL_USER_ID, PERSONAL_GROUP_ID, PERSONAL_MEMBER_ID,
+    init, read, write, runPhase1Migration
   };
 })();

@@ -5,7 +5,11 @@ window.State = (function(){
     categories: [],
     budgets: {overall:null, categoryBudgets:{}},
     recurring: [],
-    settings: {theme:'light', currency:'INR'}
+    settings: {theme:'light', currency:'INR'},
+    // Phase 1 (shared-expenses foundation) — loaded for future phases; no page reads these yet.
+    users: [],
+    groups: [],
+    groupMembers: []
   };
   const listeners = [];
 
@@ -15,6 +19,9 @@ window.State = (function(){
     data.budgets = S.read(S.KEYS.budgets, {overall:null, categoryBudgets:{}});
     data.recurring = S.read(S.KEYS.recurring, []);
     data.settings = S.read(S.KEYS.settings, {theme:'light', currency:'INR'});
+    data.users = S.read(S.KEYS.users, []);
+    data.groups = S.read(S.KEYS.groups, []);
+    data.groupMembers = S.read(S.KEYS.groupMembers, []);
   }
 
   function persist(key){
@@ -28,6 +35,14 @@ window.State = (function(){
   function addExpense(exp){
     exp.id = Utils.uid('exp');
     if(!exp.tags) exp.tags = [];
+    // Phase 1 defaults: every expense always has these fields, whether it was
+    // backfilled by migration or created just now — same personal-mode values
+    // (S.PERSONAL_GROUP_ID/PERSONAL_USER_ID) until group UI exists to set them.
+    if(exp.groupId === undefined) exp.groupId = S.PERSONAL_GROUP_ID;
+    if(exp.addedBy === undefined) exp.addedBy = S.PERSONAL_USER_ID;
+    if(exp.paidBy === undefined) exp.paidBy = S.PERSONAL_USER_ID;
+    if(exp.splitType === undefined) exp.splitType = 'none';
+    if(exp.splits === undefined) exp.splits = [];
     data.expenses.push(exp);
     persist('expenses');
     notify();
