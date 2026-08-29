@@ -129,6 +129,81 @@ window.State = (function(){
     persist('settings'); notify();
   }
 
+  // ---- Groups & members (Phase 2) ----
+  // Follows the same shape/conventions as the Categories CRUD above.
+  function activeGroupId(){
+    return data.settings.activeGroupId || S.PERSONAL_GROUP_ID;
+  }
+  function setActiveGroup(groupId){
+    setSetting('activeGroupId', groupId);
+  }
+  function addGroup(name){
+    const group = {
+      id: Utils.uid('group'),
+      name: name,
+      type: 'shared',
+      memberIds: [S.PERSONAL_USER_ID],
+      createdBy: S.PERSONAL_USER_ID,
+      createdAt: new Date().toISOString()
+    };
+    data.groups.push(group);
+    const member = {
+      id: Utils.uid('member'),
+      groupId: group.id,
+      userId: S.PERSONAL_USER_ID,
+      role: 'owner',
+      joinedAt: new Date().toISOString()
+    };
+    data.groupMembers.push(member);
+    persist('groups'); persist('groupMembers');
+    notify();
+    return group;
+  }
+  function renameGroup(id, name){
+    if(id === S.PERSONAL_GROUP_ID) return; // the Personal group is not user-editable
+    const g = data.groups.find(x=>x.id===id);
+    if(!g) return;
+    g.name = name;
+    persist('groups');
+    notify();
+  }
+  function deleteGroup(id){
+    if(id === S.PERSONAL_GROUP_ID) return; // never delete the implicit Personal group
+    data.groups = data.groups.filter(g=>g.id!==id);
+    data.groupMembers = data.groupMembers.filter(m=>m.groupId!==id);
+    if(activeGroupId() === id){
+      data.settings.activeGroupId = S.PERSONAL_GROUP_ID;
+      persist('settings');
+    }
+    persist('groups'); persist('groupMembers');
+    notify();
+  }
+  function addGroupMember(groupId, displayName){
+    const group = data.groups.find(g=>g.id===groupId);
+    if(!group) return;
+    const user = { id: Utils.uid('user'), displayName: displayName, createdAt: new Date().toISOString() };
+    data.users.push(user);
+    const member = { id: Utils.uid('member'), groupId, userId: user.id, role: 'member', joinedAt: new Date().toISOString() };
+    data.groupMembers.push(member);
+    group.memberIds.push(user.id);
+    persist('users'); persist('groupMembers'); persist('groups');
+    notify();
+    return member;
+  }
+  function removeGroupMember(memberId){
+    const member = data.groupMembers.find(m=>m.id===memberId);
+    if(!member || member.role === 'owner') return; // owner can't be removed via this action
+    data.groupMembers = data.groupMembers.filter(m=>m.id!==memberId);
+    const group = data.groups.find(g=>g.id===member.groupId);
+    if(group) group.memberIds = group.memberIds.filter(uid=>uid!==member.userId);
+    persist('groupMembers'); persist('groups');
+    notify();
+  }
+  function groupById(id){ return data.groups.find(g=>g.id===id); }
+  function userById(id){ return data.users.find(u=>u.id===id); }
+  function userName(id){ const u = userById(id); return u ? u.displayName : 'Unknown'; }
+  function membersForGroup(groupId){ return data.groupMembers.filter(m=>m.groupId===groupId); }
+
   // ---- Bulk (import/export/clear) ----
   function replaceAll(newData){
     data.expenses = newData.expenses || [];
@@ -155,6 +230,8 @@ window.State = (function(){
     addCategory, updateCategory, deleteCategory, categoryById, categoryName, categoryColor,
     setOverallBudget, setCategoryBudget,
     addRecurring, deleteRecurring, updateRecurring,
-    setSetting, replaceAll, clearAll
+    setSetting, replaceAll, clearAll,
+    activeGroupId, setActiveGroup, addGroup, renameGroup, deleteGroup,
+    addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup
   };
 })();

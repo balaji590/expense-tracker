@@ -4,6 +4,7 @@ window.Router = (function(){
     expenses: () => Pages.expenses,
     calculator: () => Pages.calculator,
     categories: () => Pages.categories,
+    groups: () => Pages.groups,
     analytics: () => Pages.analytics,
     compare: () => Pages.compare,
     budgets: () => Pages.budgets,
