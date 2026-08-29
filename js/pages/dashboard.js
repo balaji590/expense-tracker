@@ -4,7 +4,7 @@ window.Pages.dashboard = (function(){
 
   function render(container, isNewRoute){
     const st = State;
-    const all = st.data.expenses;
+    const all = State.getExpensesForGroup(State.activeGroupId());
     const now = new Date();
     const curKey = U.monthKey(now);
     const prevKey = U.prevMonthKey(curKey);

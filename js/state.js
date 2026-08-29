@@ -43,6 +43,7 @@ window.State = (function(){
     if(exp.paidBy === undefined) exp.paidBy = S.PERSONAL_USER_ID;
     if(exp.splitType === undefined) exp.splitType = 'none';
     if(exp.splits === undefined) exp.splits = [];
+    exp.createdAt = new Date().toISOString();
     data.expenses.push(exp);
     persist('expenses');
     notify();
@@ -52,6 +53,7 @@ window.State = (function(){
     const e = data.expenses.find(x=>x.id===id);
     if(!e) return;
     Object.assign(e, patch);
+    e.updatedAt = new Date().toISOString();
     persist('expenses');
     notify();
   }
@@ -204,6 +206,16 @@ window.State = (function(){
   function userName(id){ const u = userById(id); return u ? u.displayName : 'Unknown'; }
   function membersForGroup(groupId){ return data.groupMembers.filter(m=>m.groupId===groupId); }
 
+  // Phase 3: the single, centralized place every page reads group-scoped expenses
+  // from — so "an expense in Family never appears in Personal" is enforced once,
+  // here, rather than re-implemented (and possibly gotten wrong) per page.
+  function getExpensesForGroup(groupId){
+    return data.expenses.filter(e => (e.groupId || S.PERSONAL_GROUP_ID) === groupId);
+  }
+  function getExpensesForMonth(groupId, monthKey){
+    return Calc.expensesForMonth(getExpensesForGroup(groupId), monthKey);
+  }
+
   // ---- Bulk (import/export/clear) ----
   function replaceAll(newData){
     data.expenses = newData.expenses || [];
@@ -232,6 +244,7 @@ window.State = (function(){
     addRecurring, deleteRecurring, updateRecurring,
     setSetting, replaceAll, clearAll,
     activeGroupId, setActiveGroup, addGroup, renameGroup, deleteGroup,
-    addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup
+    addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup,
+    getExpensesForGroup, getExpensesForMonth
   };
 })();

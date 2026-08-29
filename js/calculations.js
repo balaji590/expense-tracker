@@ -172,9 +172,33 @@ window.Calc = (function(){
     return { subtotal, afterDiscount, tax, final };
   }
 
+  // ---- Splits (Phase 3: Equal / Custom only — no percentage/shares/balances yet) ----
+  // Pure functions, reused identically by the Add/Edit expense form's live preview
+  // and by its save-time validation, so the split math is never duplicated.
+  function equalSplit(amount, memberIds){
+    if(!memberIds || !memberIds.length) return [];
+    // Work in integer paise to avoid floating-point drift, then give any
+    // leftover paise to the first N members so the parts always sum exactly.
+    const totalPaise = Math.round(Number(amount) * 100);
+    const base = Math.floor(totalPaise / memberIds.length);
+    const remainder = totalPaise - base * memberIds.length;
+    return memberIds.map((memberId, i) => ({
+      memberId,
+      amount: (base + (i < remainder ? 1 : 0)) / 100
+    }));
+  }
+  function splitsTotal(splits){
+    return (splits||[]).reduce((s, sp) => s + Number(sp.amount||0), 0);
+  }
+  function splitsMatchAmount(splits, amount){
+    // Compare in paise so 999.999999999 vs 1000 (float drift) never false-fails.
+    return Math.round(splitsTotal(splits) * 100) === Math.round(Number(amount) * 100);
+  }
+
   return {
     expensesForMonth, expensesForToday, total, byCategory, byPaymentMethod, byDay, byDayGroups,
     highestCategory, highestExpense, avgDaily, avgTransaction,
-    buildInsights, buildSavingSuggestions, budgetStatus, calcFinal
+    buildInsights, buildSavingSuggestions, budgetStatus, calcFinal,
+    equalSplit, splitsTotal, splitsMatchAmount
   };
 })();

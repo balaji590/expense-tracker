@@ -5,7 +5,7 @@ window.Pages.analytics = (function(){
 
   function render(container){
     const st = State;
-    const allKeys = [...new Set(st.data.expenses.map(e=>U.monthKey(e.date)))];
+    const allKeys = [...new Set(State.getExpensesForGroup(State.activeGroupId()).map(e=>U.monthKey(e.date)))];
     allKeys.push(U.monthKey(new Date()));
     const uniqueKeys = [...new Set(allKeys)].sort().reverse();
 
@@ -41,7 +41,7 @@ window.Pages.analytics = (function(){
 
   function renderBody(container){
     const st = State;
-    const exp = C.expensesForMonth(st.data.expenses, selKey);
+    const exp = C.expensesForMonth(State.getExpensesForGroup(State.activeGroupId()), selKey);
     const [y,m] = selKey.split('-').map(Number);
 
     const statsEl = container.querySelector('#analyticsStats');

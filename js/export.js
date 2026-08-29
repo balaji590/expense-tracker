@@ -3,10 +3,22 @@
    (single-month export) so the CSV format is defined in exactly one place. */
 window.Export = (function(){
 
-  function toCsv(expenses, categoryNameFn){
-    let csv = 'Date,Name,Category,Payment Method,Amount,Notes\n';
+  function toCsv(expenses, categoryNameFn, opts){
+    opts = opts || {};
+    const cols = ['Date','Name','Category','Payment Method'];
+    if(opts.paidByFn) cols.push('Paid By');
+    cols.push('Amount','Notes');
+    let csv = cols.join(',') + '\n';
     expenses.forEach(e=>{
-      csv += `${new Date(e.date).toLocaleDateString('en-IN')},"${(e.name||'').replace(/"/g,'""')}",${categoryNameFn(e.category)},${e.paymentMethod||''},${e.amount},"${(e.notes||'').replace(/"/g,'""')}"\n`;
+      const row = [
+        new Date(e.date).toLocaleDateString('en-IN'),
+        `"${(e.name||'').replace(/"/g,'""')}"`,
+        categoryNameFn(e.category),
+        e.paymentMethod||''
+      ];
+      if(opts.paidByFn) row.push(opts.paidByFn(e.paidBy));
+      row.push(e.amount, `"${(e.notes||'').replace(/"/g,'""')}"`);
+      csv += row.join(',') + '\n';
     });
     return csv;
   }
