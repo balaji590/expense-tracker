@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExpenseTracker — Personal Expense Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">E</span>
+      <span class="brand-name">ExpenseTracker</span>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#/dashboard" data-route="dashboard" class="nav-item"><span class="nav-ic">◧</span>Dashboard</a>
+      <a href="#/expenses" data-route="expenses" class="nav-item"><span class="nav-ic">≣</span>Expenses</a>
+      <a href="#/calculator" data-route="calculator" class="nav-item"><span class="nav-ic">⊞</span>Calculator</a>
+      <a href="#/categories" data-route="categories" class="nav-item"><span class="nav-ic">◈</span>Categories</a>
+      <a href="#/analytics" data-route="analytics" class="nav-item"><span class="nav-ic">◔</span>Analytics</a>
+      <a href="#/compare" data-route="compare" class="nav-item"><span class="nav-ic">⇄</span>Compare</a>
+      <a href="#/budgets" data-route="budgets" class="nav-item"><span class="nav-ic">◎</span>Budgets</a>
+      <a href="#/recurring" data-route="recurring" class="nav-item"><span class="nav-ic">↻</span>Recurring</a>
+      <a href="#/settings" data-route="settings" class="nav-item"><span class="nav-ic">⚙</span>Settings</a>
+    </nav>
+    <button class="theme-toggle" id="themeToggle">
+      <span id="themeIcon">☾</span> <span id="themeLabel">Dark mode</span>
+    </button>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menu">☰</button>
+      <h1 class="page-title" id="pageTitle">Dashboard</h1>
+      <button class="btn btn-primary" id="quickAddBtn"><span class="btn-label-full">+ Add Expense</span><span class="btn-label-short" style="display:none;">+ Add</span></button>
+    </header>
+
+    <main class="content" id="mainContent">
+      <!-- page renders here -->
+    </main>
+  </div>
+
+  <nav class="bottom-nav" id="bottomNav">
+    <a href="#/dashboard" data-route="dashboard" class="bn-item">◧<span>Home</span></a>
+    <a href="#/expenses" data-route="expenses" class="bn-item">≣<span>Expenses</span></a>
+    <a href="#/calculator" data-route="calculator" class="bn-item">⊞<span>Calc</span></a>
+    <a href="#/analytics" data-route="analytics" class="bn-item">◔<span>Stats</span></a>
+    <a href="#/settings" data-route="settings" class="bn-item">⚙<span>More</span></a>
+  </nav>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+<script src="js/storage.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/state.js"></script>
+<script src="js/toast.js"></script>
+<script src="js/modal.js"></script>
+<script src="js/animate.js"></script>
+<script src="js/calculations.js"></script>
+<script src="js/export.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/pages/dashboard.js"></script>
+<script src="js/pages/expenses.js"></script>
+<script src="js/pages/calculator.js"></script>
+<script src="js/pages/categories.js"></script>
+<script src="js/pages/analytics.js"></script>
+<script src="js/pages/compare.js"></script>
+<script src="js/pages/budgets.js"></script>
+<script src="js/pages/recurring.js"></script>
+<script src="js/pages/settings.js"></script>
+<script src="js/router.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
