@@ -10,6 +10,7 @@ window.Storage = (function(){
     users: 'et_users',
     groups: 'et_groups',
     groupMembers: 'et_group_members',
+    settlements: 'et_settlements',
     migrationState: 'et_migration_state',
     migrationBackup: 'et_migration_backup'
   };

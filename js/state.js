@@ -1,5 +1,10 @@
 window.State = (function(){
   const S = window.Storage;
+  // The ONLY place the active data-access implementation is chosen. Swapping
+  // to a future ApiRepository is a one-line change here — nothing else in
+  // State, and nothing in any page, needs to know or care which one is active.
+  const repository = window.LocalRepository;
+
   let data = {
     expenses: [],
     categories: [],
@@ -14,27 +19,40 @@ window.State = (function(){
   };
   const listeners = [];
 
-  function load(){
-    data.expenses = S.read(S.KEYS.expenses, []);
-    data.categories = S.read(S.KEYS.categories, S.DEFAULT_CATEGORIES);
-    data.budgets = S.read(S.KEYS.budgets, {overall:null, categoryBudgets:{}});
-    data.recurring = S.read(S.KEYS.recurring, []);
-    data.settings = S.read(S.KEYS.settings, {theme:'light', currency:'INR'});
-    data.users = S.read(S.KEYS.users, []);
-    data.groups = S.read(S.KEYS.groups, []);
-    data.groupMembers = S.read(S.KEYS.groupMembers, []);
-    data.settlements = S.read(S.KEYS.settlements, []);
+  // Genuinely async: in a future API-backed world this is a real network
+  // fetch. Callers (only main.js today) must await this before relying on
+  // `data` being populated.
+  async function load(){
+    await repository.init();
+    data.expenses = await repository.getAll(S.KEYS.expenses, []);
+    data.categories = await repository.getAll(S.KEYS.categories, S.DEFAULT_CATEGORIES);
+    data.budgets = await repository.getAll(S.KEYS.budgets, {overall:null, categoryBudgets:{}});
+    data.recurring = await repository.getAll(S.KEYS.recurring, []);
+    data.settings = await repository.getAll(S.KEYS.settings, {theme:'light', currency:'INR'});
+    data.users = await repository.getAll(S.KEYS.users, []);
+    data.groups = await repository.getAll(S.KEYS.groups, []);
+    data.groupMembers = await repository.getAll(S.KEYS.groupMembers, []);
+    data.settlements = await repository.getAll(S.KEYS.settlements, []);
   }
 
-  function persist(key){
-    S.write(S.KEYS[key], data[key]);
+  async function persist(key){
+    await repository.save(S.KEYS[key], data[key]);
   }
 
   function onChange(fn){ listeners.push(fn); }
   function notify(){ listeners.forEach(fn => fn()); }
 
   // ---- Expenses ----
-  function addExpense(exp){
+  // Every mutation method below is `async` because persistence now goes
+  // through the (Promise-based) repository — but every method performs its
+  // actual `data` mutation BEFORE the first `await`, exactly like before.
+  // That's what makes this conversion invisible to every existing call
+  // site: none of them capture a return value (confirmed by inspection),
+  // and JS runs an async function's body synchronously up to its first
+  // `await` regardless of whether the caller awaits the call — so any code
+  // that reads `State.data.*` immediately after calling one of these
+  // (without awaiting) still sees the fully-updated data, exactly as before.
+  async function addExpense(exp){
     exp.id = Utils.uid('exp');
     if(!exp.tags) exp.tags = [];
     // Phase 1 defaults: every expense always has these fields, whether it was
@@ -47,49 +65,49 @@ window.State = (function(){
     if(exp.splits === undefined) exp.splits = [];
     exp.createdAt = new Date().toISOString();
     data.expenses.push(exp);
-    persist('expenses');
+    await persist('expenses');
     notify();
     return exp;
   }
-  function updateExpense(id, patch){
+  async function updateExpense(id, patch){
     const e = data.expenses.find(x=>x.id===id);
     if(!e) return;
     Object.assign(e, patch);
     e.updatedAt = new Date().toISOString();
-    persist('expenses');
+    await persist('expenses');
     notify();
   }
-  function deleteExpense(id){
+  async function deleteExpense(id){
     data.expenses = data.expenses.filter(e=>e.id!==id);
-    persist('expenses');
+    await persist('expenses');
     notify();
   }
-  function clearDemoData(){
+  async function clearDemoData(){
     data.expenses = data.expenses.filter(e=>!e.isDemo);
-    persist('expenses');
+    await persist('expenses');
     notify();
   }
 
   // ---- Categories ----
-  function addCategory(cat){
+  async function addCategory(cat){
     cat.id = Utils.uid('cat');
     data.categories.push(cat);
-    persist('categories');
+    await persist('categories');
     notify();
     return cat;
   }
-  function updateCategory(id, patch){
+  async function updateCategory(id, patch){
     const c = data.categories.find(x=>x.id===id);
     if(!c) return;
     Object.assign(c, patch);
-    persist('categories');
+    await persist('categories');
     notify();
   }
-  function deleteCategory(id, reassignToId){
+  async function deleteCategory(id, reassignToId){
     data.expenses.forEach(e=>{ if(e.category===id) e.category = reassignToId; });
     data.categories = data.categories.filter(c=>c.id!==id);
     if(data.budgets.categoryBudgets[id]) delete data.budgets.categoryBudgets[id];
-    persist('expenses'); persist('categories'); persist('budgets');
+    await persist('expenses'); await persist('categories'); await persist('budgets');
     notify();
   }
   function categoryById(id){ return data.categories.find(c=>c.id===id); }
@@ -97,40 +115,40 @@ window.State = (function(){
   function categoryColor(id){ const c = categoryById(id); return c ? c.color : '#8b8f97'; }
 
   // ---- Budgets ----
-  function setOverallBudget(amount){
+  async function setOverallBudget(amount){
     data.budgets.overall = amount;
-    persist('budgets'); notify();
+    await persist('budgets'); notify();
   }
-  function setCategoryBudget(catId, amount){
+  async function setCategoryBudget(catId, amount){
     if(amount === null || amount === '' || isNaN(amount)){
       delete data.budgets.categoryBudgets[catId];
     } else {
       data.budgets.categoryBudgets[catId] = amount;
     }
-    persist('budgets'); notify();
+    await persist('budgets'); notify();
   }
 
   // ---- Recurring ----
-  function addRecurring(item){
+  async function addRecurring(item){
     item.id = Utils.uid('rec');
     data.recurring.push(item);
-    persist('recurring'); notify();
+    await persist('recurring'); notify();
   }
-  function deleteRecurring(id){
+  async function deleteRecurring(id){
     data.recurring = data.recurring.filter(r=>r.id!==id);
-    persist('recurring'); notify();
+    await persist('recurring'); notify();
   }
-  function updateRecurring(id, patch){
+  async function updateRecurring(id, patch){
     const r = data.recurring.find(x=>x.id===id);
     if(!r) return;
     Object.assign(r, patch);
-    persist('recurring'); notify();
+    await persist('recurring'); notify();
   }
 
   // ---- Settings ----
-  function setSetting(key, val){
+  async function setSetting(key, val){
     data.settings[key] = val;
-    persist('settings'); notify();
+    await persist('settings'); notify();
   }
 
   // ---- Groups & members (Phase 2) ----
@@ -138,10 +156,10 @@ window.State = (function(){
   function activeGroupId(){
     return data.settings.activeGroupId || S.PERSONAL_GROUP_ID;
   }
-  function setActiveGroup(groupId){
-    setSetting('activeGroupId', groupId);
+  async function setActiveGroup(groupId){
+    await setSetting('activeGroupId', groupId);
   }
-  function addGroup(name){
+  async function addGroup(name){
     const group = {
       id: Utils.uid('group'),
       name: name,
@@ -159,31 +177,31 @@ window.State = (function(){
       joinedAt: new Date().toISOString()
     };
     data.groupMembers.push(member);
-    persist('groups'); persist('groupMembers');
+    await persist('groups'); await persist('groupMembers');
     notify();
     return group;
   }
-  function renameGroup(id, name){
+  async function renameGroup(id, name){
     if(id === S.PERSONAL_GROUP_ID) return; // the Personal group is not user-editable
     const g = data.groups.find(x=>x.id===id);
     if(!g) return;
     g.name = name;
-    persist('groups');
+    await persist('groups');
     notify();
   }
-  function deleteGroup(id){
+  async function deleteGroup(id){
     if(id === S.PERSONAL_GROUP_ID) return; // never delete the implicit Personal group
     data.groups = data.groups.filter(g=>g.id!==id);
     data.groupMembers = data.groupMembers.filter(m=>m.groupId!==id);
     data.settlements = data.settlements.filter(s=>s.groupId!==id);
     if(activeGroupId() === id){
       data.settings.activeGroupId = S.PERSONAL_GROUP_ID;
-      persist('settings');
+      await persist('settings');
     }
-    persist('groups'); persist('groupMembers'); persist('settlements');
+    await persist('groups'); await persist('groupMembers'); await persist('settlements');
     notify();
   }
-  function addGroupMember(groupId, displayName){
+  async function addGroupMember(groupId, displayName){
     const group = data.groups.find(g=>g.id===groupId);
     if(!group) return;
     const user = { id: Utils.uid('user'), displayName: displayName, createdAt: new Date().toISOString() };
@@ -191,20 +209,20 @@ window.State = (function(){
     const member = { id: Utils.uid('member'), groupId, userId: user.id, role: 'member', joinedAt: new Date().toISOString() };
     data.groupMembers.push(member);
     group.memberIds.push(user.id);
-    persist('users'); persist('groupMembers'); persist('groups');
+    await persist('users'); await persist('groupMembers'); await persist('groups');
     notify();
     return member;
   }
   // Phase 4: soft-delete. The GroupMember row is kept forever (with removedAt
   // set) so historical paidBy/split references for this member can always be
   // resolved. Existing records without removedAt are implicitly active.
-  function removeGroupMember(memberId){
+  async function removeGroupMember(memberId){
     const member = data.groupMembers.find(m=>m.id===memberId);
     if(!member || member.role === 'owner') return; // owner can't be removed via this action
     member.removedAt = new Date().toISOString();
     const group = data.groups.find(g=>g.id===member.groupId);
     if(group) group.memberIds = group.memberIds.filter(uid=>uid!==member.userId);
-    persist('groupMembers'); persist('groups');
+    await persist('groupMembers'); await persist('groups');
     notify();
   }
   function groupById(id){ return data.groups.find(g=>g.id===id); }
@@ -230,11 +248,11 @@ window.State = (function(){
   }
 
   // ---- Settlements (Phase 4) ----
-  function addSettlement(settlement){
+  async function addSettlement(settlement){
     settlement.id = Utils.uid('settle');
     settlement.createdAt = new Date().toISOString();
     data.settlements.push(settlement);
-    persist('settlements');
+    await persist('settlements');
     notify();
     return settlement;
   }
@@ -253,24 +271,22 @@ window.State = (function(){
   }
 
   // ---- Bulk (import/export/clear) ----
-  function replaceAll(newData){
+  async function replaceAll(newData){
     data.expenses = newData.expenses || [];
     data.categories = newData.categories || S.DEFAULT_CATEGORIES;
     data.budgets = newData.budgets || {overall:null, categoryBudgets:{}};
     data.recurring = newData.recurring || [];
-    persist('expenses'); persist('categories'); persist('budgets'); persist('recurring');
+    await persist('expenses'); await persist('categories'); await persist('budgets'); await persist('recurring');
     notify();
   }
-  function clearAll(){
+  async function clearAll(){
     data.expenses = [];
     data.categories = JSON.parse(JSON.stringify(S.DEFAULT_CATEGORIES));
     data.budgets = {overall:null, categoryBudgets:{}};
     data.recurring = [];
-    persist('expenses'); persist('categories'); persist('budgets'); persist('recurring');
+    await persist('expenses'); await persist('categories'); await persist('budgets'); await persist('recurring');
     notify();
   }
-
-  load();
 
   return {
     data, load, onChange, notify,

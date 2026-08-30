@@ -5,9 +5,10 @@
     document.getElementById('themeLabel').textContent = theme==='dark' ? 'Light mode' : 'Dark mode';
   }
 
-  function init(){
-    Storage.init();
-    State.load();
+  async function init(){
+    // State.load() now goes through the Repository (which calls Storage.init()
+    // internally) — main.js no longer needs to call Storage.init() directly.
+    await State.load();
 
     const theme = State.data.settings.theme || 'light';
     applyTheme(theme);
