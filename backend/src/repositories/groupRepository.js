@@ -15,6 +15,14 @@ async function findById(id){
   return result.rows[0] || null;
 }
 
+async function findPersonalGroupForUser(userId){
+  const result = await db.query(
+    `SELECT * FROM groups WHERE created_by = $1 AND type = 'personal' LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
 async function listForUser(userId){
   const result = await db.query(
     `SELECT g.*, gm.role
@@ -41,4 +49,4 @@ async function remove(id){
   await db.query('DELETE FROM groups WHERE id = $1', [id]);
 }
 
-module.exports = { create, findById, listForUser, rename, remove };
+module.exports = { create, findById, findPersonalGroupForUser, listForUser, rename, remove };

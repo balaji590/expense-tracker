@@ -285,11 +285,14 @@ window.Pages.expenses = (function(){
           onConfirm: ()=>{
             const rowEls = card.querySelectorAll(`[data-del="${id}"]`);
             const targets = Array.from(rowEls).map(b => b.closest('tr') || b.closest('.expense-card'));
+            const doDelete = ()=> State.deleteExpense(id)
+              .then(()=> Toast.show('Expense deleted'))
+              .catch(err=> Toast.show((err && err.message) || 'Could not delete expense. Please try again.'));
             if(targets.length && !Animate.prefersReducedMotion()){
               targets.forEach(t => t && t.classList.add('row-leaving'));
-              setTimeout(()=>{ State.deleteExpense(id); Toast.show('Expense deleted'); }, 170);
+              setTimeout(doDelete, 170);
             } else {
-              State.deleteExpense(id); Toast.show('Expense deleted');
+              doDelete();
             }
           }
         });
@@ -554,12 +557,16 @@ window.Pages.expenses = (function(){
       if(existingId){
         // groupId and addedBy are intentionally never included in an edit
         // payload, so State.updateExpense's merge always preserves them.
-        State.updateExpense(existingId, payload);
-        if(newMonthKey !== selKey){
-          Toast.show(`Expense moved to ${U.monthLabel(newMonthKey)}`);
-        } else {
-          Toast.show('Expense updated');
-        }
+        State.updateExpense(existingId, payload).then(()=>{
+          if(newMonthKey !== selKey){
+            Toast.show(`Expense moved to ${U.monthLabel(newMonthKey)}`);
+          } else {
+            Toast.show('Expense updated');
+          }
+          Modal.close();
+        }).catch(err=>{
+          Toast.show((err && err.message) || 'Could not save changes. Please try again.');
+        });
       } else {
         payload.groupId = State.activeGroupId();
         payload.addedBy = Storage.PERSONAL_USER_ID;
@@ -568,15 +575,18 @@ window.Pages.expenses = (function(){
           payload.splitType = 'none';
           payload.splits = [];
         }
-        State.addExpense(payload);
-        if(newMonthKey !== selKey){
-          selKey = newMonthKey;
-          Toast.show(`Expense added — showing ${U.monthLabel(selKey)}`);
-        } else {
-          Toast.show('Expense added successfully');
-        }
+        State.addExpense(payload).then(()=>{
+          if(newMonthKey !== selKey){
+            selKey = newMonthKey;
+            Toast.show(`Expense added — showing ${U.monthLabel(selKey)}`);
+          } else {
+            Toast.show('Expense added successfully');
+          }
+          Modal.close();
+        }).catch(err=>{
+          Toast.show((err && err.message) || 'Could not add expense. Please try again.');
+        });
       }
-      Modal.close();
     };
   }
 

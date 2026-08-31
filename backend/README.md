@@ -238,14 +238,146 @@ incompatible with a wildcard origin by browser spec.
 npm test
 ```
 
-60 tests across 5 suites: database connectivity, schema constraints
-(Phase 5.1), repository CRUD (Phase 5.1), app-level HTTP behavior, and
-authentication (31 tests — magic-link request/validation, email
-normalization, hash-only token storage, expiration, single-use
-enforcement, session creation/resolution/revocation, cookie attributes
-(`HttpOnly`, `SameSite`, production `Secure` default), the
-development/production dev-link gating, the `requireAuth` middleware
-directly, database-level uniqueness constraints on both new tables,
-multi-session-per-user independence, rate limiting, and a check that no
-raw token ever appears in a log line).
+79 tests across 6 suites: database connectivity, schema constraints
+(Phase 5.1), repository CRUD (Phase 5.1), app-level HTTP behavior,
+authentication (Phase 5.2, 31 tests), and the Personal expense API
+(Phase 5.4, 23 tests — see below).
+
+---
+
+## Personal Expense API (Phase 5.4)
+
+Proves the full authenticated path: **Frontend → ApiRepository → this
+API → PostgreSQL**, for a single user's own Personal expenses only. No
+groups, invitations, balances, or settlements are exposed via this API yet.
+
+### Endpoints
+
+All four require a valid session (the existing Phase 5.2 cookie) — there
+is no separate auth mechanism for this API.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/expenses` | List the authenticated user's Personal expenses |
+| POST | `/api/expenses` | Create a new Personal expense |
+| PUT | `/api/expenses/:id` | Update one of the authenticated user's own expenses |
+| DELETE | `/api/expenses/:id` | Delete one of the authenticated user's own expenses |
+
+### Personal group
+
+Every user gets exactly one Personal group, created idempotently the
+moment they first verify a magic link (`groupService.ensurePersonalGroup`,
+called from `authService.verifyMagicLink`). A database-level partial
+unique index (`idx_groups_one_personal_per_user`, migration 010)
+guarantees this at the schema level even under a concurrent-login race —
+logging in 1 or 100 times never creates more than one Personal group.
+
+### Authorization / IDOR protection
+
+Every expense operation resolves the caller's **own** Personal group from
+`req.user.id` (set by `requireAuth` from the session — never from any
+client-supplied value). An expense that exists but belongs to a different
+user's group is treated as **not found (404)**, never `403 Forbidden` —
+this is deliberate: a 403 would confirm the expense exists and just isn't
+yours, which is exactly the information an attacker probing IDs shouldn't
+get. Verified directly by test: a second authenticated user attempting to
+read, update, or delete another user's expense ID gets a clean 404 with
+the victim's data completely unaffected.
+
+### Data mapping
+
+Amounts are stored as `amount_paise` (integer, matching the same
+paise-exact convention `js/balances.js` already uses on the frontend) and
+converted to/from rupees only at the API boundary. `category` is stored as
+plain text (`category_id` column, no FK) — categories remain a
+frontend-defined global taxonomy, unchanged from every prior phase.
+`isDemo` is never part of the API shape — it's a purely local "seeded
+sample data" concept that has no server-side meaning.
+
+`id`, `createdAt`, and `updatedAt` are always server-authoritative — a
+client-supplied value for any of these in a request body is silently
+ignored, never trusted (verified by test).
+
+### Frontend integration
+
+`js/repositories/apiRepository.js` implements the same Repository
+contract as `LocalRepository` (`init`, `getAll`, `save`, plus the
+item-level `addItem`/`updateItem`/`removeItem` extension from Phase 5.4 —
+see `js/repositories/repository.js` for why that extension exists). Only
+the `et_expenses` key is API-backed; every other collection (categories,
+budgets, recurring, groups, settlements, settings) still delegates to
+`LocalRepository` untouched — this is a Personal-expenses-only
+proof-of-concept, not a full cloud migration.
+
+**One non-obvious mapping worth knowing about:** the server assigns a real
+UUID for each user's Personal group and identity, but the entire existing
+frontend codebase (`State.getExpensesForGroup`, `State.activeGroupId()`,
+every page that checks `e.paidBy === Storage.PERSONAL_USER_ID`) compares
+against the fixed local constants `'group_personal'`/`'user_local'`.
+`ApiRepository` maps every expense coming back from the server — rewriting
+`groupId`/`addedBy`/`paidBy` to those local constants — so the rest of the
+frontend never needs to know or care that a real UUID exists underneath.
+This is exactly the kind of API-DTO-to-frontend-shape mapping this phase
+asked to keep in the repository layer, out of any page.
+
+### Enabling API mode
+
+There is no build step, so "environment configuration" for the frontend
+is a small runtime override (see `js/config.js`) — **always defaults to
+local mode**:
+
+```js
+// In the browser console, or via localStorage directly:
+localStorage.setItem('et_repository_mode', 'api');
+localStorage.setItem('et_api_base_url', 'http://localhost:3001/api'); // optional, this is the default
+location.reload();
+```
+
+To switch back: `localStorage.setItem('et_repository_mode', 'local')`.
+
+**localStorage is never touched by this switch** — existing local data is
+neither uploaded nor deleted. API mode simply starts reading/writing
+Personal expenses through the server instead; every other collection
+still reads from the same localStorage it always has.
+
+### Getting a session (no Login UI yet)
+
+This phase deliberately has no login page. To obtain a session for manual
+testing:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/magic-link \
+  -H "Content-Type: application/json" -d '{"email":"you@example.com"}'
+# → devMagicLink in the response (development mode only)
+
+curl -c cookies.txt "http://localhost:3001/api/auth/verify?token=PASTE_TOKEN_HERE"
+```
+
+If testing through an actual browser (not curl) so the frontend can use
+the cookie, open the `devMagicLink` URL directly in the same browser
+you'll load the frontend in — the cookie is scoped to whichever origin
+served it.
+
+### Running the full stack locally
+
+```bash
+# Terminal 1 — backend
+cd backend && npm start          # http://localhost:3001
+
+# Terminal 2 — frontend (needs a real HTTP origin, not file://, for
+# cookies/CORS to work correctly — file:// requests send a null Origin
+# that the backend's CORS policy correctly rejects)
+cd .. && python3 -m http.server 8080   # http://localhost:8080
+```
+
+Make sure `backend/.env`'s `CORS_ORIGIN` matches whatever origin you serve
+the frontend from (defaults to `http://localhost:8080`).
+
+### What's NOT here yet
+
+Group API, invitations, shared-expense sync, balances/settlements API,
+budgets/recurring/analytics API, a real Login UI, automatic localStorage
+migration, offline sync, WebSockets — all explicitly deferred to later
+phases, per the Phase 5.4 scope boundary.
+
 

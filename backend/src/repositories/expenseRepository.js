@@ -29,14 +29,41 @@ async function listForGroupMonth(groupId, year, month){
   return result.rows;
 }
 
+// All of a group's expenses, no month filter — used by the Personal expense
+// API's GET /api/expenses, which mirrors localStorage's "give me everything"
+// semantics (each page does its own month-filtering client-side).
+async function listForGroup(groupId){
+  const result = await db.query(
+    'SELECT * FROM expenses WHERE group_id = $1 ORDER BY date DESC',
+    [groupId]
+  );
+  return result.rows;
+}
+
+// Only these columns may ever be updated via update(). patch keys are used
+// to build column names directly into the SQL text (not just parameter
+// values) — without this whitelist, a caller that ever passed through
+// unsanitized client input as patch keys would have a real SQL-injection
+// surface. The service layer must build `patch` from known fields only;
+// this is defense-in-depth in case that discipline is ever missed.
+const UPDATABLE_COLUMNS = new Set([
+  'name', 'amount_paise', 'date', 'category_id', 'payment_method', 'notes', 'tags'
+]);
+
 async function update(id, patch){
   const fields = [];
   const values = [];
   let i = 1;
   for(const [key, value] of Object.entries(patch)){
+    if(!UPDATABLE_COLUMNS.has(key)){
+      throw new Error(`Refusing to update non-whitelisted column: ${key}`);
+    }
     fields.push(`${key} = $${i}`);
     values.push(value);
     i++;
+  }
+  if(fields.length === 0){
+    return findById(id);
   }
   fields.push(`updated_at = now()`);
   values.push(id);
@@ -51,4 +78,4 @@ async function remove(id){
   await db.query('DELETE FROM expenses WHERE id = $1', [id]);
 }
 
-module.exports = { create, findById, listForGroupMonth, update, remove };
+module.exports = { create, findById, listForGroupMonth, listForGroup, update, remove };

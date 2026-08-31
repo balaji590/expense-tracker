@@ -1,9 +1,13 @@
 window.State = (function(){
   const S = window.Storage;
-  // The ONLY place the active data-access implementation is chosen. Swapping
-  // to a future ApiRepository is a one-line change here — nothing else in
-  // State, and nothing in any page, needs to know or care which one is active.
-  const repository = window.LocalRepository;
+  // The ONLY place the active data-access implementation is chosen. Reads
+  // AppConfig once at module load — nothing else in State or any page
+  // branches on mode. Defaults to LocalRepository whenever AppConfig isn't
+  // explicitly set to 'api' (see js/config.js: 'local' is always the
+  // fallback, so this application is never silently affected by API mode).
+  const repository = (window.AppConfig && window.AppConfig.repositoryMode() === 'api')
+    ? window.ApiRepository
+    : window.LocalRepository;
 
   let data = {
     expenses: [],
@@ -65,7 +69,14 @@ window.State = (function(){
     if(exp.splits === undefined) exp.splits = [];
     exp.createdAt = new Date().toISOString();
     data.expenses.push(exp);
-    await persist('expenses');
+    // addItem (not persist/save) — see repository.js for why expenses use
+    // the item-level contract. LocalRepository returns null here (nothing
+    // authoritative to add), so this Object.assign is a no-op in local
+    // mode; ApiRepository returns the server's authoritative id/groupId/
+    // addedBy/paidBy/splitType/createdAt/updatedAt, which overwrite this
+    // same object (already sitting in data.expenses) in place.
+    const authoritative = await repository.addItem(S.KEYS.expenses, exp);
+    if(authoritative) Object.assign(exp, authoritative);
     notify();
     return exp;
   }
@@ -74,12 +85,13 @@ window.State = (function(){
     if(!e) return;
     Object.assign(e, patch);
     e.updatedAt = new Date().toISOString();
-    await persist('expenses');
+    const authoritative = await repository.updateItem(S.KEYS.expenses, id, patch);
+    if(authoritative) Object.assign(e, authoritative);
     notify();
   }
   async function deleteExpense(id){
     data.expenses = data.expenses.filter(e=>e.id!==id);
-    await persist('expenses');
+    await repository.removeItem(S.KEYS.expenses, id);
     notify();
   }
   async function clearDemoData(){

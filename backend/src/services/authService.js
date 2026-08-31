@@ -3,6 +3,7 @@ const config = require('../config');
 const userRepo = require('../repositories/userRepository');
 const magicLinkRepo = require('../repositories/magicLinkRepository');
 const sessionRepo = require('../repositories/sessionRepository');
+const groupService = require('./groupService');
 const { ValidationError, AppError } = require('../errors');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -71,6 +72,10 @@ async function verifyMagicLink(rawToken){
     const displayName = record.email.split('@')[0];
     user = await userRepo.create({ email: record.email, displayName });
   }
+
+  // Idempotent — safe on every login, not just the first. Guarantees the
+  // Personal expense API (Phase 5.4) always has a group to work with.
+  await groupService.ensurePersonalGroup(user.id);
 
   const sessionRawToken = generateToken();
   const sessionTokenHash = hashToken(sessionRawToken);
