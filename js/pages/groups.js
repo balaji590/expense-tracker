@@ -132,7 +132,13 @@ window.Pages.groups = (function(){
         title: `Delete "${U.escapeHtml(group.name)}"?`,
         body: 'This removes the group and its member list. It does not delete any expenses.',
         confirmText: 'Delete', danger: true,
-        onConfirm: ()=>{ State.deleteGroup(group.id); Toast.show('Group deleted'); }
+        onConfirm: ()=>{
+          State.deleteGroup(group.id).then(()=>{
+            Toast.show('Group deleted');
+          }).catch(e=>{
+            Toast.show((e && e.message) || 'Could not delete group. Please try again.');
+          });
+        }
       });
     };
 
@@ -166,7 +172,13 @@ window.Pages.groups = (function(){
           title: `Remove ${U.escapeHtml(name)}?`,
           body: warningBody,
           confirmText: 'Remove', danger: true,
-          onConfirm: ()=>{ State.removeGroupMember(memberId); Toast.show('Member removed'); }
+          onConfirm: ()=>{
+            State.removeGroupMember(memberId).then(()=>{
+              Toast.show('Member removed');
+            }).catch(e=>{
+              Toast.show((e && e.message) || 'Could not remove member. Please try again.');
+            });
+          }
         });
       };
     });
@@ -190,9 +202,12 @@ window.Pages.groups = (function(){
       const name = document.getElementById('groupNameInput').value.trim();
       const err = document.getElementById('groupNameErr');
       if(!name){ err.classList.add('show'); document.getElementById('groupNameInput').classList.add('invalid'); return; }
-      State.addGroup(name);
-      Toast.show('Group created');
-      Modal.close();
+      State.addGroup(name).then(()=>{
+        Toast.show('Group created');
+        Modal.close();
+      }).catch(e=>{
+        Toast.show((e && e.message) || 'Could not create group. Please try again.');
+      });
     };
   }
 
@@ -214,9 +229,12 @@ window.Pages.groups = (function(){
       const name = document.getElementById('groupRenameInput').value.trim();
       const err = document.getElementById('groupRenameErr');
       if(!name){ err.classList.add('show'); document.getElementById('groupRenameInput').classList.add('invalid'); return; }
-      State.renameGroup(group.id, name);
-      Toast.show('Group renamed');
-      Modal.close();
+      State.renameGroup(group.id, name).then(()=>{
+        Toast.show('Group renamed');
+        Modal.close();
+      }).catch(e=>{
+        Toast.show((e && e.message) || 'Could not rename group. Please try again.');
+      });
     };
   }
 
@@ -238,9 +256,12 @@ window.Pages.groups = (function(){
       const name = document.getElementById('memberNameInput').value.trim();
       const err = document.getElementById('memberNameErr');
       if(!name){ err.classList.add('show'); document.getElementById('memberNameInput').classList.add('invalid'); return; }
-      State.addGroupMember(group.id, name);
-      Toast.show(`${name} added to ${group.name}`);
-      Modal.close();
+      State.addGroupMember(group.id, name).then(()=>{
+        Toast.show(`${name} added to ${group.name}`);
+        Modal.close();
+      }).catch(e=>{
+        Toast.show((e && e.message) || 'Could not add member. Please try again.');
+      });
     };
   }
 

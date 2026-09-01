@@ -106,3 +106,18 @@ inspection before writing any code, both phases). `main.js` awaits
 failing gracefully (e.g. an unauthenticated API-mode session) with a clear
 message instead of a blank page or an uncaught rejection -- still no Login
 UI, per the Phase 5.4 scope boundary.
+
+## Phase 5.5: Groups + Membership
+
+Groups and group membership are now API-backed the same way expenses are
+(Phase 5.4) — same item-level contract, same ID-remapping approach (the
+Personal group's real server UUID maps back to `Storage.PERSONAL_GROUP_ID`
+so every existing page keeps working unmodified), same "attempt the
+repository call before committing local state" pattern so a rejected API
+call never leaves a phantom group or member behind. See
+`backend/README.md`'s "Groups + Membership API" section for the full
+authorization model, the Personal-group protection rules, and the
+documented "adding a member by name isn't implemented in cloud mode yet"
+limitation (it would require fabricating an email identity, which is
+explicitly the wrong direction before real invitations exist).
+

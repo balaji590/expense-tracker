@@ -165,8 +165,17 @@ window.State = (function(){
 
   // ---- Groups & members (Phase 2) ----
   // Follows the same shape/conventions as the Categories CRUD above.
+  // Hardened (Phase 5.5): a stored activeGroupId that no longer corresponds
+  // to any loaded group (stale from a previous session, a deleted group, or
+  // tampered-with localStorage) falls back safely to Personal rather than
+  // leaving the UI pointed at a group that doesn't exist. This check is
+  // purely a display-safety net — it grants no access by itself, since
+  // every group-scoped read in API mode only ever contains groups the
+  // server already confirmed this user belongs to.
   function activeGroupId(){
-    return data.settings.activeGroupId || S.PERSONAL_GROUP_ID;
+    const stored = data.settings.activeGroupId;
+    if(stored && data.groups.some(g => g.id === stored)) return stored;
+    return S.PERSONAL_GROUP_ID;
   }
   async function setActiveGroup(groupId){
     await setSetting('activeGroupId', groupId);
@@ -180,7 +189,18 @@ window.State = (function(){
       createdBy: S.PERSONAL_USER_ID,
       createdAt: new Date().toISOString()
     };
-    data.groups.push(group);
+    // Attempt the repository call BEFORE committing to local memory — in
+    // API mode a failed create (bad name, network error, etc.) must never
+    // leave a phantom group behind that doesn't exist server-side.
+    // LocalRepository.addItem never rejects, so local-mode behavior is
+    // unchanged (still fully synchronous-feeling, just reordered).
+    const authoritativeGroup = await repository.addItem(S.KEYS.groups, group);
+    if(authoritativeGroup) Object.assign(group, authoritativeGroup);
+
+    // The member object is built AFTER group.id is finalized — building it
+    // earlier (using the client placeholder id) would leave member.groupId
+    // pointing at an id that no longer matches the group once its real/
+    // mapped id is applied above.
     const member = {
       id: Utils.uid('member'),
       groupId: group.id,
@@ -188,8 +208,11 @@ window.State = (function(){
       role: 'owner',
       joinedAt: new Date().toISOString()
     };
+    const authoritativeMember = await repository.addItem(S.KEYS.groupMembers, member);
+    if(authoritativeMember) Object.assign(member, authoritativeMember);
+
+    data.groups.push(group);
     data.groupMembers.push(member);
-    await persist('groups'); await persist('groupMembers');
     notify();
     return group;
   }
@@ -198,7 +221,8 @@ window.State = (function(){
     const g = data.groups.find(x=>x.id===id);
     if(!g) return;
     g.name = name;
-    await persist('groups');
+    const authoritative = await repository.updateItem(S.KEYS.groups, id, { name });
+    if(authoritative) Object.assign(g, authoritative);
     notify();
   }
   async function deleteGroup(id){
@@ -206,22 +230,32 @@ window.State = (function(){
     data.groups = data.groups.filter(g=>g.id!==id);
     data.groupMembers = data.groupMembers.filter(m=>m.groupId!==id);
     data.settlements = data.settlements.filter(s=>s.groupId!==id);
+    await repository.removeItem(S.KEYS.groups, id);
     if(activeGroupId() === id){
       data.settings.activeGroupId = S.PERSONAL_GROUP_ID;
       await persist('settings');
     }
-    await persist('groups'); await persist('groupMembers'); await persist('settlements');
+    await persist('groupMembers'); await persist('settlements');
     notify();
   }
   async function addGroupMember(groupId, displayName){
     const group = data.groups.find(g=>g.id===groupId);
     if(!group) return;
     const user = { id: Utils.uid('user'), displayName: displayName, createdAt: new Date().toISOString() };
-    data.users.push(user);
     const member = { id: Utils.uid('member'), groupId, userId: user.id, role: 'member', joinedAt: new Date().toISOString() };
+    // Attempt the repository call FIRST — in API mode this currently always
+    // rejects (adding a member isn't implemented yet, see groupService.js's
+    // addMemberByName), and a rejection must never leave a phantom local
+    // user/member behind. LocalRepository.addItem never rejects, so
+    // local-mode behavior (and its persisted result) is unchanged.
+    const authoritative = await repository.addItem(S.KEYS.groupMembers, member);
+    if(authoritative) Object.assign(member, authoritative);
+
+    data.users.push(user);
+    await persist('users');
     data.groupMembers.push(member);
     group.memberIds.push(user.id);
-    await persist('users'); await persist('groupMembers'); await persist('groups');
+    await persist('groupMembers'); await persist('groups');
     notify();
     return member;
   }
@@ -234,6 +268,9 @@ window.State = (function(){
     member.removedAt = new Date().toISOString();
     const group = data.groups.find(g=>g.id===member.groupId);
     if(group) group.memberIds = group.memberIds.filter(uid=>uid!==member.userId);
+    // groupId passed as extra context — see repository.js: the API's
+    // remove-member URL is scoped by group, unlike the flat local array.
+    await repository.removeItem(S.KEYS.groupMembers, memberId, { groupId: member.groupId });
     await persist('groupMembers'); await persist('groups');
     notify();
   }

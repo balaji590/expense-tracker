@@ -238,10 +238,11 @@ incompatible with a wildcard origin by browser spec.
 npm test
 ```
 
-79 tests across 6 suites: database connectivity, schema constraints
+106 tests across 7 suites: database connectivity, schema constraints
 (Phase 5.1), repository CRUD (Phase 5.1), app-level HTTP behavior,
-authentication (Phase 5.2, 31 tests), and the Personal expense API
-(Phase 5.4, 23 tests — see below).
+authentication (Phase 5.2, 31 tests), the Personal expense API
+(Phase 5.4, 23 tests), and Groups + Membership (Phase 5.5, 27 tests —
+see below).
 
 ---
 
@@ -379,5 +380,136 @@ Group API, invitations, shared-expense sync, balances/settlements API,
 budgets/recurring/analytics API, a real Login UI, automatic localStorage
 migration, offline sync, WebSockets — all explicitly deferred to later
 phases, per the Phase 5.4 scope boundary.
+
+---
+
+## Groups + Membership API (Phase 5.5)
+
+Extends the same authenticated path proven in Phase 5.4 to Groups and
+Group Membership: **Frontend → ApiRepository → this API → PostgreSQL**.
+
+### Endpoints
+
+All require a valid session.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/groups` | List groups the authenticated user belongs to (Personal first) |
+| POST | `/api/groups` | Create a shared group; creator becomes owner atomically |
+| PUT | `/api/groups/:id` | Rename a shared group (owner only) |
+| DELETE | `/api/groups/:id` | Delete a shared group (owner only) |
+| GET | `/api/groups/:groupId/members` | List active members of a group |
+| POST | `/api/groups/:groupId/members` | **Not implemented yet** — see "Development member limitation" below |
+| DELETE | `/api/groups/:groupId/members/:memberId` | Remove a member (owner only) |
+
+### Personal group protection
+
+Enforced entirely server-side, never trusted from the client: renaming or
+deleting a group whose `type` is `'personal'` always returns `403`,
+regardless of what the frontend sends. A database-level partial unique
+index (migration 010, from Phase 5.4) already guarantees at most one
+Personal group per user; this phase adds the request-time protection on
+top of that guarantee.
+
+### Authorization model — two tiers
+
+1. **Non-member of a group → `404`, always**, for every operation (GET,
+   rename, delete, list members, remove members). A group that doesn't
+   exist and a group you're not in are deliberately indistinguishable —
+   the same convention established for the Personal expense API in
+   Phase 5.4. Verified with real two-user attack simulations (both via
+   curl and in the automated E2E test): the attacker gets a clean 404,
+   and the victim's group is provably unaffected afterward.
+2. **Active member but not owner → `403`**, for owner-only actions
+   (rename, delete, remove-member). This is different from the case
+   above: since they're a legitimate member, they already know the group
+   exists — a 403 here correctly signals "you lack permission" without
+   disclosing anything new.
+
+Every check resolves membership from `req.user.id` (set by `requireAuth`
+from the session) — a client can never supply a `userId`, `ownerId`, or
+`role` that influences the result. Verified by test: sending
+`{name, createdBy: <fake-uuid>}` on create still records the *real*
+authenticated user as `created_by`; there is no route that accepts a
+role change at all.
+
+### Group creation is atomic
+
+`POST /api/groups` runs inside a database transaction: the group row and
+its owner-membership row are created together, or neither is (a
+rollback on any failure). The response includes both the group and the
+membership row in one round-trip, so the frontend never needs a second
+request to learn the membership's own id.
+
+### Development member limitation — read this before testing "Add member"
+
+**Adding a member by name is not implemented in cloud mode in this
+phase**, and this is intentional, not an oversight. The `users` table
+requires a real, unique email (`CITEXT UNIQUE NOT NULL`) — there is no
+concept of a placeholder or nameless account. Fabricating an email
+address for a name-only "member" would mean creating a fake account,
+which is explicitly the wrong direction to take before real invitations
+exist. `POST /api/groups/:groupId/members` therefore returns a clear
+`501 Not Implemented` with an explanatory message
+(`"Adding members isn't available yet in cloud mode — invitations are
+coming in a future update."`), after first confirming the requester is
+actually a member of the group (so the error only ever reaches someone
+who's legitimately looking at that group).
+
+**What this means for testing:** every group created via the API in this
+phase has exactly one member — its owner. Membership removal is still
+fully implemented and tested (owner-only, last-owner-protected,
+soft-delete) against members inserted directly in the test database,
+simulating what a future invitation-acceptance flow will eventually do
+for real.
+
+**Frontend behavior:** the existing "Add member" modal in `groups.js` is
+completely unchanged — it still calls `State.addGroupMember(groupId,
+name)` exactly as before. In local mode this still works exactly as it
+always has. In API mode, the call rejects with the backend's message,
+which surfaces as a toast — no phantom local member is left behind (the
+repository call is attempted *before* any local state is committed, so a
+rejection never creates local data that doesn't exist server-side).
+
+### Data mapping — the ID-remapping lesson, applied again
+
+The server assigns a real UUID for every group, including the user's own
+Personal one — but the entire existing frontend (`groups.js`'s
+`st.groupById(Storage.PERSONAL_GROUP_ID)`, `State.activeGroupId()`'s
+fallback, `getExpensesForGroup`, etc.) compares against the fixed local
+constant `Storage.PERSONAL_GROUP_ID`. Exactly the Phase 5.4 UUID-mapping
+lesson, applied to groups: `ApiRepository` remaps the Personal group's
+real id back to the local constant on every read; shared groups keep
+their real UUID as-is (there's no local constant for them to collide
+with). The same applies to group membership: since every member in this
+phase *is* the authenticated user (no other identity can be added yet),
+`userId` on every membership row is remapped to
+`Storage.PERSONAL_USER_ID` — which resolves correctly to "Me" because
+`Storage.init()` (still running via `LocalRepository` even in API mode)
+already seeds a local User record for that constant.
+
+### Active group safety net
+
+`State.activeGroupId()` now falls back to Personal if the stored id
+doesn't correspond to any currently-loaded group (stale from a previous
+session, a since-deleted group, or a tampered localStorage value). This
+is a **display safety net only** — it grants no access by itself. Real
+authorization always happens server-side: even if `activeGroupId`
+somehow held another user's real group UUID, `data.groups` (loaded from
+that user's *own* accessible-groups list) would simply never contain it,
+so nothing leaks regardless of what's in localStorage.
+
+### Repository contract — no new extension needed
+
+Groups and group membership reuse the exact same item-level contract
+(`addItem`/`updateItem`/`removeItem`) introduced for expenses in
+Phase 5.4 — no further contract extension was required. The one addition
+is a documented *optional* third argument to `removeItem(key, id, extra)`,
+used only when removing a group member (the API's URL is scoped by group
+— `/api/groups/:groupId/members/:memberId` — so the group id has to travel
+alongside the member id somehow; `LocalRepository` ignores this argument
+entirely, since its flat local array already has everything it needs
+from `key` and `id` alone).
+
 
 
