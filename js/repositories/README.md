@@ -149,3 +149,75 @@ for a `?token=` parameter. See `backend/README.md`'s "Invitations" section
 for the full lifecycle, the wrong-user-protection ordering, and the
 "no fake users, ever" identity rule.
 
+## Phase 5.6.1: Public Landing Page + Authentication UX
+
+Transforms the entry experience for **API mode only** — local mode is
+completely untouched and still boots straight into the Dashboard exactly
+as it always has (`AppConfig.repositoryMode() === 'local'` is checked
+first, before any auth logic runs at all).
+
+**New boot flow (API mode):** `main.js` resolves auth status once at
+startup via the existing `State.whoAmI()` (built in Phase 5.6, wraps
+`GET /api/auth/me`, already tolerant of "not authenticated") — no
+polling, no repeated calls. Authenticated → the existing app shell boots
+exactly as before. Not authenticated → a new public shell (Landing /
+Sign In / Create Account, in `js/pages/landing.js` and `js/pages/auth.js`,
+styled by the new isolated `css/landing.css`) renders instead, swapped in
+by toggling a `.hidden` class between `.app-shell` and a new sibling
+`#publicRoot` container — no new routing framework, no duplicated
+authentication checks scattered across pages.
+
+**Sign In and Create Account are the same component** (`js/pages/auth.js`,
+parameterized by `mode`) since both use the identical magic-link
+mechanism — no password fields, no duplicated form logic. Both call the
+existing `State.requestSignInLink(email)` from Phase 5.6.
+
+**Accept-invite compatibility:** `#/accept-invite?token=...` is special-
+cased to always render inside the existing app shell (least risk to "must
+continue working"), and — a real gap found and fixed during this phase —
+no longer requires `State.load()` to succeed first, since the page itself
+(`previewInvitation` + `whoAmI`) is already fully auth-tolerant. A cold,
+never-before-seen visitor clicking a real invitation link for the first
+time now correctly reaches the preview + sign-in prompt instead of a
+generic boot error. One narrow edge case is handled explicitly rather
+than silently: a fresh browser with no repository-mode override at all
+(defaults to local) opening an invitation link gets an honest "this needs
+cloud mode" prompt with an explicit opt-in button — never a silent mode
+flip, per the standing "never silently switch existing users to API mode"
+rule from Phase 5.4.
+
+**Account/logout:** a small menu is injected into the existing sidebar
+(above the theme toggle) only when authenticated in API mode, showing the
+user's email and a Log out button that calls the existing
+`/api/auth/logout` endpoint directly, then returns to Landing.
+
+See `backend/README.md` if you're looking for the auth API itself — it
+wasn't touched; this phase is a pure frontend consumer of what already
+existed.
+
+The "adding a member by name isn't implemented in cloud mode" limitation
+from Phase 5.5 is now replaced with a real, identity-based invitation
+flow — in **cloud mode only**. `groups.js`'s "Add member" (by name) UI is
+completely unchanged for **local mode**; the two flows never appear
+together, decided by a single `State.isCloudMode()` check the Groups page
+asks rather than importing `Repository`/`AppConfig` itself.
+
+Invitation methods (`createInvitation`/`listInvitations`/
+`revokeInvitation`/`previewInvitation`/`acceptInvitation`) live directly
+on `ApiRepository`/`LocalRepository`, outside the core Repository
+contract — they don't fit "a collection of items keyed by a Storage key"
+the way expenses/groups/members do (there's no local equivalent at all).
+`LocalRepository`'s versions reject clearly rather than silently doing
+nothing, in case a future code path ever calls them without checking mode
+first.
+
+A new minimal page, `#/accept-invite?token=...`, handles the recipient
+side of the flow — preview, then either a one-click "send me a sign-in
+link" (reusing the *existing* magic-link request endpoint) or an Accept
+button if already signed in. This required one small, genuinely necessary
+addition to `router.js`: query-string parsing for the hash-based route
+(`Router.currentQuery()`), since `location.hash` has no built-in support
+for a `?token=` parameter. See `backend/README.md`'s "Invitations" section
+for the full lifecycle, the wrong-user-protection ordering, and the
+"no fake users, ever" identity rule.
+
