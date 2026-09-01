@@ -10,6 +10,11 @@ async function create({ groupId, invitedEmail, invitedBy, tokenHash, expiresAt }
   return result.rows[0];
 }
 
+async function findById(id){
+  const result = await db.query('SELECT * FROM invitations WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
 async function findByTokenHash(tokenHash){
   const result = await db.query('SELECT * FROM invitations WHERE token_hash = $1', [tokenHash]);
   return result.rows[0] || null;
@@ -21,6 +26,14 @@ async function findPending(groupId, invitedEmail){
     [groupId, invitedEmail]
   );
   return result.rows[0] || null;
+}
+
+async function listPendingForGroup(groupId){
+  const result = await db.query(
+    `SELECT * FROM invitations WHERE group_id = $1 AND status = 'pending' ORDER BY created_at DESC`,
+    [groupId]
+  );
+  return result.rows;
 }
 
 async function markAccepted(id){
@@ -39,4 +52,4 @@ async function markRevoked(id){
   return result.rows[0] || null;
 }
 
-module.exports = { create, findByTokenHash, findPending, markAccepted, markRevoked };
+module.exports = { create, findById, findByTokenHash, findPending, listPendingForGroup, markAccepted, markRevoked };

@@ -52,7 +52,26 @@ window.LocalRepository = (function(){
     await save(key, all.filter(x => x.id !== id));
   }
 
-  const repo = { init, getAll, save, addItem, updateItem, removeItem };
+  // Invitations and auth-status are genuinely API-only concepts — local
+  // mode has no server, no other identity to invite, and no "am I signed
+  // in" question (you always just are, implicitly). These aren't part of
+  // the core Repository contract (they don't fit "a collection keyed by a
+  // Storage key"), so they're plain extra methods, not contract-checked.
+  // A clear rejection is safer than silently doing nothing, in case a
+  // future UI path ever calls these without first checking the mode.
+  function createInvitation(){ return Promise.reject(new Error('Invitations are only available in cloud mode.')); }
+  function listInvitations(){ return Promise.resolve([]); } // a read — an empty list is the honest, safe answer, not an error
+  function revokeInvitation(){ return Promise.reject(new Error('Invitations are only available in cloud mode.')); }
+  function previewInvitation(){ return Promise.reject(new Error('Invitations are only available in cloud mode.')); }
+  function acceptInvitation(){ return Promise.reject(new Error('Invitations are only available in cloud mode.')); }
+  function whoAmI(){ return Promise.resolve(null); } // local mode has no separate "signed in" identity to report
+  function requestMagicLink(){ return Promise.reject(new Error('Signing in is only available in cloud mode.')); }
+
+  const repo = {
+    init, getAll, save, addItem, updateItem, removeItem,
+    createInvitation, listInvitations, revokeInvitation, previewInvitation, acceptInvitation,
+    whoAmI, requestMagicLink
+  };
   Repository.assertImplementsContract(repo, 'LocalRepository');
   Repository.assertImplementsItemContract(repo, 'LocalRepository');
   return repo;

@@ -33,6 +33,7 @@ module.exports = {
   auth: {
     magicLinkTtlMinutes: parseInt(process.env.AUTH_MAGIC_LINK_TTL_MINUTES || '15', 10),
     sessionTtlDays: parseInt(process.env.AUTH_SESSION_TTL_DAYS || '30', 10),
+    invitationTtlDays: parseInt(process.env.AUTH_INVITATION_TTL_DAYS || '7', 10),
     // 'development' is the only mode that ever exposes a raw magic link in
     // an API response. Double-gated below (also requires nodeEnv !== 'production')
     // so a misconfigured AUTH_EMAIL_MODE can never leak a real token in prod.

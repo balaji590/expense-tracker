@@ -274,6 +274,46 @@ window.State = (function(){
     await persist('groupMembers'); await persist('groups');
     notify();
   }
+  // ---- Invitations (Phase 5.6) — API-mode only; see repository stubs ----
+  // These are thin pass-throughs, not item-level CRUD on a local collection
+  // (there's no local equivalent), so they call the repository's own
+  // invitation methods directly rather than going through persist/addItem.
+  async function inviteMember(groupId, email){
+    return repository.createInvitation(groupId, email);
+  }
+  async function listPendingInvitations(groupId){
+    return repository.listInvitations(groupId);
+  }
+  async function revokeInvitation(groupId, invitationId){
+    return repository.revokeInvitation(groupId, invitationId);
+  }
+  async function previewInvitation(token){
+    return repository.previewInvitation(token);
+  }
+  async function acceptInvitation(token){
+    const result = await repository.acceptInvitation(token);
+    // Accepting adds a new group + membership server-side — refresh just
+    // those two collections (not a full State.load()) so the app reflects
+    // it immediately without an unnecessary full reload of everything else.
+    data.groups = await repository.getAll(S.KEYS.groups, data.groups);
+    data.groupMembers = await repository.getAll(S.KEYS.groupMembers, data.groupMembers);
+    notify();
+    return result;
+  }
+  async function whoAmI(){
+    return repository.whoAmI();
+  }
+  async function requestSignInLink(email){
+    return repository.requestMagicLink(email);
+  }
+  // Lets pages branch on mode (e.g. Groups showing "Invite by email" vs.
+  // "Add member by name") without importing Repository/AppConfig
+  // themselves — they only ever ask State, never inspect which concrete
+  // implementation is active.
+  function isCloudMode(){
+    return repository === window.ApiRepository;
+  }
+
   function groupById(id){ return data.groups.find(g=>g.id===id); }
   function userById(id){ return data.users.find(u=>u.id===id); }
   function userName(id){ const u = userById(id); return u ? u.displayName : 'Unknown'; }
@@ -347,6 +387,8 @@ window.State = (function(){
     activeGroupId, setActiveGroup, addGroup, renameGroup, deleteGroup,
     addGroupMember, removeGroupMember, groupById, userById, userName, membersForGroup, membersForBalances,
     getExpensesForGroup, getExpensesForMonth,
-    addSettlement, getSettlementsForGroup
+    addSettlement, getSettlementsForGroup,
+    inviteMember, listPendingInvitations, revokeInvitation, previewInvitation, acceptInvitation,
+    whoAmI, requestSignInLink, isCloudMode
   };
 })();

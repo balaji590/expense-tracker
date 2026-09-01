@@ -10,12 +10,24 @@ window.Router = (function(){
     compare: () => Pages.compare,
     budgets: () => Pages.budgets,
     recurring: () => Pages.recurring,
-    settings: () => Pages.settings
+    settings: () => Pages.settings,
+    'accept-invite': () => Pages.acceptInvite
   };
 
   function currentRoute(){
-    const hash = location.hash.replace('#/', '') || 'dashboard';
-    return routes[hash] ? hash : 'dashboard';
+    const raw = location.hash.replace('#/', '') || 'dashboard';
+    const routeKey = raw.split('?')[0];
+    return routes[routeKey] ? routeKey : 'dashboard';
+  }
+
+  // Minimal query-string support for routes that need a parameter in the
+  // link itself (e.g. #/accept-invite?token=...) — location.hash has no
+  // built-in query parsing, since everything after '#' is normally just a
+  // route name in this app.
+  function currentQuery(){
+    const raw = location.hash.replace('#/', '');
+    const queryString = raw.includes('?') ? raw.split('?')[1] : '';
+    return new URLSearchParams(queryString);
   }
 
   let lastRenderedRoute = null;
@@ -52,5 +64,5 @@ window.Router = (function(){
     render();
   }
 
-  return { init, render };
+  return { init, render, currentQuery };
 })();

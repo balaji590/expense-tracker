@@ -238,11 +238,11 @@ incompatible with a wildcard origin by browser spec.
 npm test
 ```
 
-106 tests across 7 suites: database connectivity, schema constraints
+140 tests across 8 suites: database connectivity, schema constraints
 (Phase 5.1), repository CRUD (Phase 5.1), app-level HTTP behavior,
 authentication (Phase 5.2, 31 tests), the Personal expense API
-(Phase 5.4, 23 tests), and Groups + Membership (Phase 5.5, 27 tests —
-see below).
+(Phase 5.4, 23 tests), Groups + Membership (Phase 5.5, 27 tests), and
+Invitations (Phase 5.6, 34 tests — see below).
 
 ---
 
@@ -510,6 +510,149 @@ used only when removing a group member (the API's URL is scoped by group
 alongside the member id somehow; `LocalRepository` ignores this argument
 entirely, since its flat local array already has everything it needs
 from `key` and `id` alone).
+
+---
+
+## Invitations (Phase 5.6)
+
+**Real email delivery is NOT implemented in this phase.** Every invitation
+still uses the same development-link mechanism as Phase 5.2's magic
+links — see "Development invitation links" below.
+
+This phase replaces the "add member by name" limitation documented above
+with a real, identity-based invitation flow: `Group Owner → enter real
+email → invitation created → dev invitation link → recipient
+authenticates → accepts → becomes an active GroupMember`.
+
+### Endpoints
+
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| POST | `/api/groups/:groupId/invitations` | Create an invitation | Owner only |
+| GET | `/api/groups/:groupId/invitations` | List pending invitations | Owner only |
+| DELETE | `/api/groups/:groupId/invitations/:invitationId` | Revoke a pending invitation | Owner only |
+| GET | `/api/invitations/:token/preview` | Preview (group name + invited email) | Public — no auth required |
+| POST | `/api/invitations/:token/accept` | Accept | Requires auth, email must match |
+
+### Data model
+
+Reuses the `invitations` table created back in **Phase 5.1's migration
+004** — no new migration was needed at all for this phase. That table
+already had every field this phase required: `group_id`, `invited_email`
+(`CITEXT`, case-insensitive), `invited_by`, `token_hash`, `status`
+(`pending`/`accepted`/`revoked`/`expired`), `expires_at`, `created_at`,
+`accepted_at`, plus a partial unique index guaranteeing at most one
+pending invitation per (group, email) at a time.
+
+### The identity rule — no fake users, ever
+
+**This is the most important constraint in this phase.** An invitation
+never creates a `User` record. `users.email` is `CITEXT UNIQUE NOT NULL`
+— there's no concept of a placeholder account. The invited person's
+identity is only ever resolved through the *existing, unmodified*
+magic-link authentication flow: they request a sign-in link for the
+exact email they were invited at, and `authService.verifyMagicLink`
+creates their `User` record at that point, exactly as it would for
+anyone signing up for the first time — the invitation flow adds nothing
+new to identity creation. An invitation can exist for an email that has
+no `User` yet at all; it simply waits until that email actually
+authenticates.
+
+### Token security
+
+Identical convention to magic links and sessions: `crypto.randomBytes(32)`
+(256-bit), SHA-256 hash stored, raw token never persisted or logged —
+verified by test. Default expiry is 7 days
+(`AUTH_INVITATION_TTL_DAYS`, configurable).
+
+### Wrong-user protection — the critical ordering detail
+
+If `wife@example.com` is invited and `husband@example.com` (a real,
+different authenticated user) tries to accept using that link, the
+request is rejected with `403` — **and the invitation is left completely
+untouched**, still valid for the real recipient. This only works because
+of a specific ordering: the invitation is looked up **read-only** first,
+the authenticated user's email is compared against the invited email,
+and **only after that match succeeds** does the code proceed to the
+atomic consume-and-create-membership transaction. Marking the invitation
+"used" before checking the email would burn the token for the correct
+recipient too, the moment anyone else merely tried the link. Verified by
+test: after a wrong-user attempt, the invitation is still previewable
+and still acceptable by the real recipient.
+
+### Concurrency — race-safe acceptance
+
+The final transaction re-checks `status = 'pending' AND expires_at >
+now()` at the database level inside a single `UPDATE ... RETURNING`,
+after the wrong-user check has already passed. Two simultaneous
+acceptance attempts for the same (already-verified-correct-user) token
+are handled the same way magic-link verification always has been:
+exactly one `UPDATE` can match and win; the other gets zero rows back
+and fails cleanly. Verified by test with a real `Promise.all` of two
+concurrent accept requests — exactly one succeeds, and exactly one
+`group_members` row is ever created.
+
+### Removed-member re-invitation — preserving historical identity
+
+If someone is removed from a group and later re-invited (to the same
+email) and accepts, their **original `GroupMember` row is reactivated**
+(`removed_at` cleared, same `id`) rather than a new row being created.
+This preserves historical semantics: any past expense split that already
+references their `GroupMember.id` stays correctly attributed to the same
+identity, now active again. Being re-invited does **not** automatically
+restore membership — reactivation only happens at the moment of explicit
+acceptance, verified by test (re-inviting alone leaves the old membership
+row still marked removed until the new invitation is actually accepted).
+
+### Duplicate invitations and already-a-member
+
+A second invitation to the same (group, email) while one is still
+pending **revokes the old one and issues a fresh token** atomically
+(new 7-day expiry) — the database's own partial unique index would
+reject a second literal pending row anyway, so "replace" is the only
+coherent behavior given that constraint. Inviting an email that already
+belongs to an active member returns `409 Conflict` without creating
+anything.
+
+### Authorization
+
+Every operation resolves membership from `req.user.id` via the same
+`getGroupAndMembership` helper introduced in Phase 5.5 — a non-member
+gets `404` for every invitation operation on a group they don't belong
+to (indistinguishable from the group not existing); an active member who
+isn't the owner gets `403` for owner-only actions (invite, list, revoke).
+The Personal group rejects invitation creation with `403` — it must
+remain private, single-user, and non-shareable, enforced server-side
+regardless of what the client sends.
+
+### Development invitation links
+
+Identical double-gate to Phase 5.2's magic links: `devInvitationLink` is
+only ever present in the response when `AUTH_EMAIL_MODE=development`
+**and** `NODE_ENV !== 'production'`. A misconfigured `AUTH_EMAIL_MODE`
+alone can never leak a real invitation link in production — verified by
+test using the exact same pattern as the magic-link production-leakage
+test.
+
+### Frontend: Groups UI and invitation acceptance
+
+In **cloud (API) mode**, a group owner sees an "Invite member" button
+(email input) plus a "Pending invitations" section with per-invitation
+Revoke buttons, replacing the old "Add member by name" flow entirely.
+**Local mode is completely unchanged** — it still shows "Add member" by
+name exactly as it always has; the two flows are mutually exclusive
+based on which repository is active, decided by a single `State.isCloudMode()`
+check (Groups page never imports `Repository`/`AppConfig` directly, only
+asks `State`).
+
+A minimal new page, `#/accept-invite?token=...`, handles the recipient
+side: it previews the invitation (public, no auth needed), and then
+either prompts for sign-in (with a one-click "send me a sign-in link"
+that reuses the *existing* magic-link request endpoint — no new
+authentication mechanism) or shows an Accept button if already signed
+in. This is deliberately minimal — not a general login page, only
+reachable via an invitation link, and it disappears from relevance the
+moment the invitation is accepted or declined.
 
 
 

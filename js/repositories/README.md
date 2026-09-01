@@ -121,3 +121,31 @@ documented "adding a member by name isn't implemented in cloud mode yet"
 limitation (it would require fabricating an email identity, which is
 explicitly the wrong direction before real invitations exist).
 
+## Phase 5.6: Invitations
+
+The "adding a member by name isn't implemented in cloud mode" limitation
+from Phase 5.5 is now replaced with a real, identity-based invitation
+flow — in **cloud mode only**. `groups.js`'s "Add member" (by name) UI is
+completely unchanged for **local mode**; the two flows never appear
+together, decided by a single `State.isCloudMode()` check the Groups page
+asks rather than importing `Repository`/`AppConfig` itself.
+
+Invitation methods (`createInvitation`/`listInvitations`/
+`revokeInvitation`/`previewInvitation`/`acceptInvitation`) live directly
+on `ApiRepository`/`LocalRepository`, outside the core Repository
+contract — they don't fit "a collection of items keyed by a Storage key"
+the way expenses/groups/members do (there's no local equivalent at all).
+`LocalRepository`'s versions reject clearly rather than silently doing
+nothing, in case a future code path ever calls them without checking mode
+first.
+
+A new minimal page, `#/accept-invite?token=...`, handles the recipient
+side of the flow — preview, then either a one-click "send me a sign-in
+link" (reusing the *existing* magic-link request endpoint) or an Accept
+button if already signed in. This required one small, genuinely necessary
+addition to `router.js`: query-string parsing for the hash-based route
+(`Router.currentQuery()`), since `location.hash` has no built-in support
+for a `?token=` parameter. See `backend/README.md`'s "Invitations" section
+for the full lifecycle, the wrong-user-protection ordering, and the
+"no fake users, ever" identity rule.
+

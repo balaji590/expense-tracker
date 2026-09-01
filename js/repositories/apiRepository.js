@@ -238,5 +238,49 @@ window.ApiRepository = (function(){
   const repo = { init, getAll, save, addItem, updateItem, removeItem };
   Repository.assertImplementsContract(repo, 'ApiRepository');
   Repository.assertImplementsItemContract(repo, 'ApiRepository');
+
+  // ===================== Invitations (Phase 5.6) =====================
+  // Not part of the core Repository contract — invitations don't fit "a
+  // collection of items keyed by a Storage key" (there's no local
+  // equivalent at all; see LocalRepository's stubs). Plain extra methods,
+  // called directly by State's own invitation-specific wrapper functions.
+
+  async function createInvitation(groupId, email){
+    return ApiClient.request(`/groups/${realGroupIdFor(groupId)}/invitations`, { method: 'POST', body: { email } });
+  }
+  async function listInvitations(groupId){
+    const body = await ApiClient.request(`/groups/${realGroupIdFor(groupId)}/invitations`, { method: 'GET' });
+    return (body && body.invitations) || [];
+  }
+  async function revokeInvitation(groupId, invitationId){
+    await ApiClient.request(`/groups/${realGroupIdFor(groupId)}/invitations/${invitationId}`, { method: 'DELETE' });
+  }
+  async function previewInvitation(token){
+    return ApiClient.request(`/invitations/${token}/preview`, { method: 'GET' });
+  }
+  async function acceptInvitation(token){
+    return ApiClient.request(`/invitations/${token}/accept`, { method: 'POST' });
+  }
+
+  // Wraps GET /api/auth/me. Returns null on an unauthenticated (401)
+  // response rather than throwing — "not signed in" is an expected,
+  // ordinary state for the invitation-acceptance page to handle, not an error.
+  async function whoAmI(){
+    try{
+      const body = await ApiClient.request('/auth/me', { method: 'GET' });
+      return body && body.user ? body.user : null;
+    }catch(e){
+      if(e instanceof ApiError && e.code === 'unauthorized') return null;
+      throw e;
+    }
+  }
+  async function requestMagicLink(email){
+    return ApiClient.request('/auth/magic-link', { method: 'POST', body: { email } });
+  }
+
+  Object.assign(repo, {
+    createInvitation, listInvitations, revokeInvitation, previewInvitation, acceptInvitation,
+    whoAmI, requestMagicLink
+  });
   return repo;
 })();

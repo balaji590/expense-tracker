@@ -37,10 +37,22 @@ window.Pages.groups = (function(){
     container.querySelector('#createGroupBtn').onclick = openCreateGroupModal;
   }
 
+  // isOwner is computed from already-loaded State data (no extra fetch) —
+  // needed here because the cloud-mode "Invite member" / pending-invitations
+  // section is owner-only, and the server enforces this too (never trusted
+  // from this UI check alone).
+  function isOwnerOfGroup(groupId){
+    const members = State.membersForGroup(groupId);
+    const mine = members.find(m => m.userId === Storage.PERSONAL_USER_ID);
+    return !!(mine && mine.role === 'owner');
+  }
+
   function groupCardShell(group, isPersonal){
     const st = State;
     const isActive = st.activeGroupId() === group.id;
-    const members = st.membersForGroup(group.id);
+    const cloud = st.isCloudMode();
+    const showInvite = !isPersonal && cloud && isOwnerOfGroup(group.id);
+    const showAddByName = !isPersonal && !cloud;
     return `
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
@@ -57,7 +69,9 @@ window.Pages.groups = (function(){
           </div>
         </div>
         <div id="memberList-${group.id}"></div>
-        ${!isPersonal ? `<button class="btn btn-sm" style="margin-top:12px;" data-addmember="${group.id}">+ Add member</button>` : ''}
+        ${showInvite ? `<div id="pendingInvites-${group.id}" style="margin-top:10px;"></div>` : ''}
+        ${showAddByName ? `<button class="btn btn-sm" style="margin-top:12px;" data-addmember="${group.id}">+ Add member</button>` : ''}
+        ${showInvite ? `<button class="btn btn-sm" style="margin-top:12px;" data-invitemember="${group.id}">+ Invite member</button>` : ''}
       </div>
     `;
   }
@@ -85,6 +99,56 @@ window.Pages.groups = (function(){
     }).join('');
   }
 
+  // Cloud-mode-only, owner-only. Fetches asynchronously (a real network
+  // call) after the card's own synchronous HTML is already in place —
+  // shows a lightweight "Loading…" placeholder in the meantime, exactly
+  // the pattern this page didn't previously need since everything else it
+  // shows comes from already-loaded local State.
+  async function renderPendingInvitations(container, group){
+    const wrap = container.querySelector(`#pendingInvites-${group.id}`);
+    if(!wrap) return;
+    wrap.innerHTML = `<div class="stat-sub">Loading pending invitations…</div>`;
+    let invitations;
+    try{
+      invitations = await State.listPendingInvitations(group.id);
+    }catch(e){
+      wrap.innerHTML = `<div class="stat-sub">Could not load pending invitations.</div>`;
+      return;
+    }
+    if(!invitations.length){
+      wrap.innerHTML = '';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="stat-sub" style="margin-bottom:6px;">Pending invitations</div>
+      ${invitations.map(inv => `
+        <div class="save-row">
+          <div style="font-size:13.5px;">${U.escapeHtml(inv.email)}</div>
+          <button class="btn btn-sm btn-danger" data-revokeinvite="${inv.id}" data-revokegroup="${group.id}">Revoke</button>
+        </div>
+      `).join('')}
+    `;
+    wrap.querySelectorAll('[data-revokeinvite]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const invitationId = btn.getAttribute('data-revokeinvite');
+        const groupId = btn.getAttribute('data-revokegroup');
+        Modal.confirm({
+          title: 'Revoke this invitation?',
+          body: 'The invitation link will stop working immediately.',
+          confirmText: 'Revoke', danger: true,
+          onConfirm: ()=>{
+            State.revokeInvitation(groupId, invitationId).then(()=>{
+              Toast.show('Invitation revoked');
+              renderPendingInvitations(container, group);
+            }).catch(e=>{
+              Toast.show((e && e.message) || 'Could not revoke invitation.');
+            });
+          }
+        });
+      };
+    });
+  }
+
   function renderPersonalCard(container, personalGroup){
     const wrap = container.querySelector('#personalGroupCard');
     if(!personalGroup){ wrap.innerHTML = ''; return; }
@@ -110,6 +174,9 @@ window.Pages.groups = (function(){
     sharedGroups.forEach(g => {
       wrap.querySelector(`#memberList-${g.id}`).innerHTML = memberRowsHtml(g);
       bindCardActions(container, g, false);
+      if(State.isCloudMode() && isOwnerOfGroup(g.id)){
+        renderPendingInvitations(container, g);
+      }
     });
   }
 
@@ -144,6 +211,9 @@ window.Pages.groups = (function(){
 
     const addMemberBtn = container.querySelector(`[data-addmember="${group.id}"]`);
     if(addMemberBtn) addMemberBtn.onclick = ()=> openAddMemberModal(group);
+
+    const inviteMemberBtn = container.querySelector(`[data-invitemember="${group.id}"]`);
+    if(inviteMemberBtn) inviteMemberBtn.onclick = ()=> openInviteMemberModal(container, group);
 
     container.querySelectorAll(`#memberList-${group.id} [data-removemember]`).forEach(btn=>{
       btn.onclick = ()=>{
@@ -238,6 +308,7 @@ window.Pages.groups = (function(){
     };
   }
 
+  // Local mode only — unchanged from before Phase 5.6.
   function openAddMemberModal(group){
     Modal.open(`
       <div class="modal-title">Add member to ${U.escapeHtml(group.name)}</div>
@@ -261,6 +332,50 @@ window.Pages.groups = (function(){
         Modal.close();
       }).catch(e=>{
         Toast.show((e && e.message) || 'Could not add member. Please try again.');
+      });
+    };
+  }
+
+  // Cloud mode only (Phase 5.6) — replaces "add by name" with a real
+  // email-based invitation. The identity is only ever created/located when
+  // the recipient actually authenticates with that email (existing magic-
+  // link flow) — this modal never creates a User itself.
+  function openInviteMemberModal(container, group){
+    Modal.open(`
+      <div class="modal-title">Invite member to ${U.escapeHtml(group.name)}</div>
+      <div class="field">
+        <label>Email address</label>
+        <input type="email" id="inviteEmailInput" placeholder="e.g. priya@example.com">
+        <div class="field-error" id="inviteEmailErr">Enter a valid email address.</div>
+      </div>
+      <div id="inviteDevLinkWrap"></div>
+      <div class="modal-actions">
+        <button class="btn" id="inviteCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="inviteSendBtn">Send invitation</button>
+      </div>
+    `);
+    document.getElementById('inviteCancelBtn').onclick = Modal.close;
+    document.getElementById('inviteSendBtn').onclick = ()=>{
+      const email = document.getElementById('inviteEmailInput').value.trim();
+      const err = document.getElementById('inviteEmailErr');
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        err.classList.add('show'); document.getElementById('inviteEmailInput').classList.add('invalid'); return;
+      }
+      err.classList.remove('show');
+      State.inviteMember(group.id, email).then((result)=>{
+        Toast.show(`Invitation sent to ${email}`);
+        if(result && result.devInvitationLink){
+          document.getElementById('inviteDevLinkWrap').innerHTML = `
+            <div class="stat-sub" style="margin-top:8px;">Development mode — share this link with the recipient:</div>
+            <input type="text" readonly value="${U.escapeHtml(result.devInvitationLink)}" style="margin-top:4px;" onclick="this.select()">
+          `;
+        } else {
+          Modal.close();
+        }
+        renderPendingInvitations(container, group);
+      }).catch(e=>{
+        err.textContent = (e && e.message) || 'Could not send invitation. Please try again.';
+        err.classList.add('show');
       });
     };
   }
