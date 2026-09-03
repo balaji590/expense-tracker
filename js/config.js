@@ -15,13 +15,31 @@ window.AppConfig = (function(){
   const DEFAULT_MODE = 'local';
   const DEFAULT_API_BASE_URL = 'http://localhost:3001/api';
 
+  // The real, publicly-hosted deployment of this app should default to
+  // cloud mode for a brand-new visitor (there's no "existing local-mode
+  // user" to disrupt on a domain nobody has ever visited before, and local
+  // mode fundamentally can't do anything this product is now built
+  // around — sharing, invitations). Everywhere else (file://, localhost
+  // during development/testing) keeps the safe 'local' default this
+  // entire codebase's test suite already relies on.
+  const PRODUCTION_HOSTNAMES = ['expensetracker-balaji590.netlify.app'];
+  const PRODUCTION_API_BASE_URL = 'https://expense-tracker-ugzg.onrender.com/api';
+
+  function isProductionHost(){
+    return PRODUCTION_HOSTNAMES.includes(window.location.hostname);
+  }
+
   function repositoryMode(){
     const override = window.localStorage.getItem('et_repository_mode');
-    return override === 'api' ? 'api' : DEFAULT_MODE;
+    if(override === 'api') return 'api';
+    if(override === 'local') return 'local';
+    return isProductionHost() ? 'api' : DEFAULT_MODE;
   }
 
   function apiBaseUrl(){
-    return window.localStorage.getItem('et_api_base_url') || DEFAULT_API_BASE_URL;
+    const override = window.localStorage.getItem('et_api_base_url');
+    if(override) return override;
+    return isProductionHost() ? PRODUCTION_API_BASE_URL : DEFAULT_API_BASE_URL;
   }
 
   return { repositoryMode, apiBaseUrl };
