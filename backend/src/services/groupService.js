@@ -130,7 +130,11 @@ async function deleteGroupById(userId, groupId){
 
 async function listMembers(userId, groupId){
   await getGroupAndMembership(userId, groupId); // any active member may view the list
-  return memberRepo.listForGroup(groupId);
+  // Enriched (Phase 5.7): includes email/display_name so the frontend can
+  // show real identities for OTHER members, not just the caller — needed
+  // for correct Paid By / Added By attribution on shared expenses. Purely
+  // additive fields on top of the existing row shape.
+  return memberRepo.listForGroupWithUserInfo(groupId);
 }
 
 // Explicitly NOT implemented: adding a member requires a real email

@@ -21,8 +21,26 @@ async function listForExpense(expenseId){
   return result.rows;
 }
 
+// Bulk variant of listForExpense — used by shared-expense listing (many
+// expenses at once) to avoid an N+1 query pattern (one SELECT per expense).
+// Returns a Map keyed by expense_id so callers can do a simple .get(id) per
+// row with an empty-array fallback for expenses that have no splits.
+async function listForExpenses(expenseIds){
+  if(!expenseIds || expenseIds.length === 0) return new Map();
+  const result = await db.query(
+    'SELECT * FROM expense_splits WHERE expense_id = ANY($1::uuid[])',
+    [expenseIds]
+  );
+  const map = new Map();
+  for(const row of result.rows){
+    if(!map.has(row.expense_id)) map.set(row.expense_id, []);
+    map.get(row.expense_id).push(row);
+  }
+  return map;
+}
+
 async function deleteForExpense(expenseId){
   await db.query('DELETE FROM expense_splits WHERE expense_id = $1', [expenseId]);
 }
 
-module.exports = { createMany, listForExpense, deleteForExpense };
+module.exports = { createMany, listForExpense, listForExpenses, deleteForExpense };

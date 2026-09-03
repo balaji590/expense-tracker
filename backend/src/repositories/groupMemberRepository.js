@@ -34,4 +34,25 @@ async function softRemove(id){
   return result.rows[0] || null;
 }
 
-module.exports = { create, findById, listForGroup, softRemove };
+// Same rows as listForGroup, but also brings back each member's email and
+// display_name (joined from users). Before real invitations existed, every
+// membership row belonged to the caller themselves, so the frontend never
+// needed this — it always just showed "Me". Now that a group can have real
+// OTHER members (Phase 5.6 invitations), the frontend needs a way to learn
+// who they actually are in order to show correct Paid By / Added By
+// attribution for shared expenses (Phase 5.7). Purely additive: listForGroup
+// itself is untouched, and every existing caller keeps using it unchanged.
+async function listForGroupWithUserInfo(groupId, { includeRemoved = false } = {}){
+  const clause = includeRemoved ? '' : 'AND gm.removed_at IS NULL';
+  const result = await db.query(
+    `SELECT gm.*, u.email, u.display_name
+     FROM group_members gm
+     JOIN users u ON u.id = gm.user_id
+     WHERE gm.group_id = $1 ${clause}
+     ORDER BY gm.joined_at`,
+    [groupId]
+  );
+  return result.rows;
+}
+
+module.exports = { create, findById, listForGroup, listForGroupWithUserInfo, softRemove };

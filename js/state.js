@@ -26,16 +26,29 @@ window.State = (function(){
   // Genuinely async: in a future API-backed world this is a real network
   // fetch. Callers (only main.js today) must await this before relying on
   // `data` being populated.
+  //
+  // Order matters here (Phase 5.7): groups must load before groupMembers
+  // (ApiRepository's fetchAllMembersAcrossGroups reuses the just-fetched
+  // groups list, and also learns "my own real user id" from the Personal
+  // group's created_by field as a side effect of loading groups first).
+  // groupMembers must load before users (ApiRepository.getAll for users
+  // merges in real OTHER members' identities learned while loading
+  // groupMembers — see apiRepository.js's knownUsers). expenses must load
+  // after groups (ApiRepository needs to know which groups are shared, to
+  // fetch each one's expenses). None of this reordering changes local-mode
+  // behavior at all: LocalRepository.getAll is a plain independent
+  // localStorage read per key with no cross-key dependency, so the order
+  // these assignments happen in has no effect on what ends up in `data`.
   async function load(){
     await repository.init();
+    data.groups = await repository.getAll(S.KEYS.groups, []);
+    data.groupMembers = await repository.getAll(S.KEYS.groupMembers, []);
+    data.users = await repository.getAll(S.KEYS.users, []);
     data.expenses = await repository.getAll(S.KEYS.expenses, []);
     data.categories = await repository.getAll(S.KEYS.categories, S.DEFAULT_CATEGORIES);
     data.budgets = await repository.getAll(S.KEYS.budgets, {overall:null, categoryBudgets:{}});
     data.recurring = await repository.getAll(S.KEYS.recurring, []);
     data.settings = await repository.getAll(S.KEYS.settings, {theme:'light', currency:'INR'});
-    data.users = await repository.getAll(S.KEYS.users, []);
-    data.groups = await repository.getAll(S.KEYS.groups, []);
-    data.groupMembers = await repository.getAll(S.KEYS.groupMembers, []);
     data.settlements = await repository.getAll(S.KEYS.settlements, []);
   }
 
@@ -85,13 +98,21 @@ window.State = (function(){
     if(!e) return;
     Object.assign(e, patch);
     e.updatedAt = new Date().toISOString();
-    const authoritative = await repository.updateItem(S.KEYS.expenses, id, patch);
+    // groupId passed as extra context (Phase 5.7), same pattern as
+    // removeGroupMember below: an edit payload never includes groupId
+    // itself (it never changes an expense's group — see
+    // js/pages/expenses.js's bindForm), but ApiRepository needs it to know
+    // which endpoint (Personal vs a specific shared group) to call.
+    // LocalRepository.updateItem ignores this extra argument entirely.
+    const authoritative = await repository.updateItem(S.KEYS.expenses, id, patch, { groupId: e.groupId });
     if(authoritative) Object.assign(e, authoritative);
     notify();
   }
   async function deleteExpense(id){
-    data.expenses = data.expenses.filter(e=>e.id!==id);
-    await repository.removeItem(S.KEYS.expenses, id);
+    const e = data.expenses.find(x=>x.id===id);
+    data.expenses = data.expenses.filter(x=>x.id!==id);
+    // groupId passed as extra context — see updateExpense above.
+    await repository.removeItem(S.KEYS.expenses, id, { groupId: e && e.groupId });
     notify();
   }
   async function clearDemoData(){
@@ -235,7 +256,22 @@ window.State = (function(){
       data.settings.activeGroupId = S.PERSONAL_GROUP_ID;
       await persist('settings');
     }
-    await persist('groupMembers'); await persist('settlements');
+    // Pre-existing defect fixed (found via Phase 5.7 E2E testing): in API
+    // mode, the backend's DELETE /groups/:id already cascades to remove
+    // that group's members/expenses/settlements at the database level (see
+    // groupRepository.remove's comment) -- the item-level removeItem call
+    // above is already authoritative and persisted. Calling persist() for
+    // groupMembers here would attempt a whole-array re-save, which
+    // ApiRepository deliberately rejects (see repository.js: groupMembers
+    // is item-level-only in API mode) -- this was throwing whenever a real
+    // cloud user deleted a shared group that had ever had a member in it.
+    // Local mode still needs this call: LocalRepository has no server to
+    // cascade the deletion for it, so the already-filtered in-memory data
+    // must still be explicitly saved.
+    if(!isCloudMode()){
+      await persist('groupMembers');
+    }
+    await persist('settlements');
     notify();
   }
   async function addGroupMember(groupId, displayName){
@@ -271,7 +307,20 @@ window.State = (function(){
     // groupId passed as extra context — see repository.js: the API's
     // remove-member URL is scoped by group, unlike the flat local array.
     await repository.removeItem(S.KEYS.groupMembers, memberId, { groupId: member.groupId });
-    await persist('groupMembers'); await persist('groups');
+    // Pre-existing defect fixed (found via Phase 5.7 E2E testing): in API
+    // mode, the backend's soft-delete (via the removeItem call above) is
+    // already authoritative and persisted. Calling persist() here would
+    // attempt a whole-array re-save of groupMembers/groups, which
+    // ApiRepository deliberately rejects (see repository.js) -- this was
+    // throwing on every single real-cloud-group member removal, unrelated
+    // to Phase 5.7. Local mode still needs these calls: LocalRepository.
+    // removeItem hard-deletes the record, and this immediately-following
+    // persist() is what turns that into the intended Phase 4 soft-delete
+    // (re-saving the in-memory object, which still has removedAt set,
+    // instead of leaving it hard-deleted).
+    if(!isCloudMode()){
+      await persist('groupMembers'); await persist('groups');
+    }
     notify();
   }
   // ---- Invitations (Phase 5.6) — API-mode only; see repository stubs ----
@@ -292,11 +341,16 @@ window.State = (function(){
   }
   async function acceptInvitation(token){
     const result = await repository.acceptInvitation(token);
-    // Accepting adds a new group + membership server-side — refresh just
-    // those two collections (not a full State.load()) so the app reflects
-    // it immediately without an unnecessary full reload of everything else.
+    // Accepting adds a new group + membership server-side — refresh those
+    // collections (not a full State.load()) so the app reflects it
+    // immediately without an unnecessary full reload of everything else.
+    // users is refreshed too (Phase 5.7): fetching groupMembers is what
+    // discovers real OTHER members' identities (see
+    // apiRepository.js's knownUsers), so without this, the group owner's
+    // name wouldn't resolve until the next full page load.
     data.groups = await repository.getAll(S.KEYS.groups, data.groups);
     data.groupMembers = await repository.getAll(S.KEYS.groupMembers, data.groupMembers);
+    data.users = await repository.getAll(S.KEYS.users, data.users);
     notify();
     return result;
   }
