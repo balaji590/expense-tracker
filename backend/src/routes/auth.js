@@ -9,10 +9,17 @@ const { parseCookies } = require('../utils/cookies');
 const router = express.Router();
 
 function setSessionCookie(res, rawToken){
+  // SameSite=Lax works fine when frontend and backend share an origin (or
+  // are both plain localhost during development), but a REAL cross-domain
+  // deployment (e.g. a Netlify frontend calling a Render backend) needs
+  // SameSite=None for the browser to send this cookie back on a
+  // cross-origin fetch() call at all. SameSite=None is only valid alongside
+  // Secure=true (browsers reject the combination otherwise) — so this
+  // follows cookieSecure exactly rather than being a separate setting.
   res.cookie(config.auth.cookieName, rawToken, {
     httpOnly: true,           // never readable from JavaScript — blocks XSS token theft
     secure: config.auth.cookieSecure,
-    sameSite: 'lax',
+    sameSite: config.auth.cookieSecure ? 'none' : 'lax',
     path: '/',
     maxAge: config.auth.sessionTtlDays * 24 * 60 * 60 * 1000
   });
@@ -22,7 +29,7 @@ function clearSessionCookie(res){
   res.clearCookie(config.auth.cookieName, {
     httpOnly: true,
     secure: config.auth.cookieSecure,
-    sameSite: 'lax',
+    sameSite: config.auth.cookieSecure ? 'none' : 'lax',
     path: '/'
   });
 }
