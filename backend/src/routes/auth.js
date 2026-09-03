@@ -31,7 +31,7 @@ router.post('/auth/magic-link',
   rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
-    keyFn: (req) => \\:\\
+    keyFn: (req) => req.ip + ':' + authService.normalizeEmail(req.body && req.body.email)
   }),
   validate({ body: { email: { type: 'string', required: true } } }),
   async (req, res, next) => {
