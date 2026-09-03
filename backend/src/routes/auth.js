@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const config = require('../config');
 const authService = require('../services/authService');
 const requireAuth = require('../middleware/requireAuth');
@@ -9,15 +9,8 @@ const { parseCookies } = require('../utils/cookies');
 const router = express.Router();
 
 function setSessionCookie(res, rawToken){
-  // SameSite=Lax works fine when frontend and backend share an origin (or
-  // are both plain localhost during development), but a REAL cross-domain
-  // deployment (e.g. a Netlify frontend calling a Render backend) needs
-  // SameSite=None for the browser to send this cookie back on a
-  // cross-origin fetch() call at all. SameSite=None is only valid alongside
-  // Secure=true (browsers reject the combination otherwise) — so this
-  // follows cookieSecure exactly rather than being a separate setting.
   res.cookie(config.auth.cookieName, rawToken, {
-    httpOnly: true,           // never readable from JavaScript — blocks XSS token theft
+    httpOnly: true,
     secure: config.auth.cookieSecure,
     sameSite: config.auth.cookieSecure ? 'none' : 'lax',
     path: '/',
@@ -34,20 +27,16 @@ function clearSessionCookie(res){
   });
 }
 
-// Rate-limited by IP+email so spamming link requests at one address (or from
-// one client) is bounded. See middleware/rateLimiter.js for its real limits.
 router.post('/auth/magic-link',
   rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
-    keyFn: (req) => `${req.ip}:${authService.normalizeEmail(req.body && req.body.email)}`
+    keyFn: (req) => \\:\\
   }),
   validate({ body: { email: { type: 'string', required: true } } }),
   async (req, res, next) => {
     try{
       const { devMagicLink } = await authService.requestMagicLink(req.body.email);
-      // Generic response regardless of whether the email had an existing
-      // account — never reveal account existence via response differences.
       const body = { message: 'If an account can use this email, a sign-in link has been generated.' };
       if(devMagicLink) body.devMagicLink = devMagicLink;
       res.status(200).json(body);
@@ -55,8 +44,6 @@ router.post('/auth/magic-link',
   }
 );
 
-// Not separately rate-limited: tokens carry 256 bits of entropy, so brute
-// forcing a valid one here is infeasible regardless of request rate.
 router.get('/auth/verify',
   validate({ query: { token: { type: 'string', required: true } } }),
   async (req, res, next) => {
