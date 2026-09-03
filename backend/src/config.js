@@ -28,7 +28,11 @@ module.exports = {
     // test run can never truncate/corrupt real development data.
     database: isTest ? required('TEST_DB_NAME') : required('DB_NAME'),
     user: required('DB_USER'),
-    password: required('DB_PASSWORD')
+    password: required('DB_PASSWORD'),
+    // Cloud Postgres providers (Neon, Supabase, RDS, etc.) require SSL.
+    // Local Postgres typically doesn't support/need it, so this defaults
+    // to off and must be explicitly enabled via DB_SSL=true.
+    ssl: process.env.DB_SSL === 'true'
   },
   auth: {
     magicLinkTtlMinutes: parseInt(process.env.AUTH_MAGIC_LINK_TTL_MINUTES || '15', 10),
