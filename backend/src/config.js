@@ -47,5 +47,22 @@ module.exports = {
     cookieSecure: process.env.AUTH_COOKIE_SECURE !== undefined
       ? process.env.AUTH_COOKIE_SECURE === 'true'
       : isProduction
+  },
+  email: {
+    // Used to send real magic-link/invitation emails whenever
+    // AUTH_EMAIL_MODE !== 'development' (see emailService.js). Not
+    // `required()` here — a deployment that never leaves dev mode simply
+    // never needs it, and emailService.js itself throws a clear error if a
+    // send is attempted without it configured, rather than failing at
+    // server startup for a deployment that doesn't need email at all.
+    resendApiKey: process.env.RESEND_API_KEY,
+    // Resend's own shared sandbox sender — works with zero setup (no
+    // domain verification needed) so real email sending works immediately;
+    // switch to a verified custom domain address once you have one.
+    from: process.env.EMAIL_FROM || 'ExpenseTracker <onboarding@resend.dev>',
+    // The frontend's public URL — used to build the invitation-accept link
+    // and the post-sign-in redirect destination. Falls back to the
+    // dev-mode local frontend for local testing.
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:8080'
   }
 };

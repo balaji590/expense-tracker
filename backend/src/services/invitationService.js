@@ -6,6 +6,7 @@ const groupRepo = require('../repositories/groupRepository');
 const memberRepo = require('../repositories/groupMemberRepository');
 const invitationRepo = require('../repositories/invitationRepository');
 const userRepo = require('../repositories/userRepository');
+const emailService = require('./emailService');
 const { ValidationError, NotFoundError, ForbiddenError, ConflictError, AppError } = require('../errors');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -107,6 +108,18 @@ async function createInvitation(userId, groupId, rawEmail){
   const devInvitationLink = shouldExposeDevLink
     ? `${config.auth.devBaseUrl}/api/invitations/${rawToken}/preview`
     : undefined;
+
+  // Real email sending is gated purely on emailMode, deliberately NOT on
+  // the same double-gate as devInvitationLink above — see authService.js's
+  // requestMagicLink for the identical reasoning. Points straight at the
+  // FRONTEND's own accept-invite page (js/pages/accept-invite.js already
+  // handles preview + sign-in + accept end to end) rather than a backend
+  // URL — there's no JSON-vs-redirect concern here since it was always
+  // meant to be opened directly by a human.
+  if(config.auth.emailMode !== 'development'){
+    const acceptUrl = `${config.email.frontendUrl}/#/accept-invite?token=${rawToken}`;
+    await emailService.sendInvitationEmail({ to: email, groupName: group.name, url: acceptUrl });
+  }
 
   return { invitation: toSafeInvitation(invitation), devInvitationLink };
 }

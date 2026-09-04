@@ -4,6 +4,7 @@ const userRepo = require('../repositories/userRepository');
 const magicLinkRepo = require('../repositories/magicLinkRepository');
 const sessionRepo = require('../repositories/sessionRepository');
 const groupService = require('./groupService');
+const emailService = require('./emailService');
 const { ValidationError, AppError } = require('../errors');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,6 +46,25 @@ async function requestMagicLink(rawEmail){
   const devMagicLink = shouldExposeDevLink
     ? `${config.auth.devBaseUrl}/api/auth/verify?token=${rawToken}`
     : undefined;
+
+  // Real email sending is gated purely on emailMode, deliberately NOT on
+  // the same double-gate as devMagicLink above. Those two gates answer
+  // different questions: "is it safe to put the raw token in this JSON
+  // response" (needs both conditions) vs. "did the operator actually ask
+  // for real email" (only emailMode). If emailMode is still 'development'
+  // in a misconfigured production deploy, the safest behavior is to send
+  // nothing at all (matching pre-email-feature behavior exactly) rather
+  // than attempt a real send nobody asked for. `redirect=1` tells the
+  // verify route (routes/auth.js) to redirect the browser to the frontend
+  // dashboard after signing in, instead of returning raw JSON — a real
+  // email recipient clicking this link should land on the app, not a JSON
+  // blob. The dev-mode link above intentionally omits this: the existing
+  // "click here, then come back and press Continue" dev flow (pages/auth.js)
+  // expects the JSON response.
+  if(config.auth.emailMode !== 'development'){
+    const verifyUrl = `${config.auth.devBaseUrl}/api/auth/verify?token=${rawToken}&redirect=1`;
+    await emailService.sendMagicLinkEmail({ to: email, url: verifyUrl });
+  }
 
   return { devMagicLink };
 }

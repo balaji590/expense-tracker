@@ -50,6 +50,17 @@ router.get('/auth/verify',
     try{
       const { user, sessionRawToken } = await authService.verifyMagicLink(req.query.token);
       setSessionCookie(res, sessionRawToken);
+      // A real email's link includes ?redirect=1 (see authService.js) so
+      // clicking it lands the person on the actual app, not a JSON blob.
+      // The existing dev-mode link (pages/auth.js's "click here, then come
+      // back and press Continue" flow) never sets this, so its JSON
+      // response is completely unchanged — zero impact on that flow or on
+      // every existing test's loginAs() helper, which also relies on the
+      // JSON body and never passes redirect=1.
+      if(req.query.redirect === '1'){
+        res.redirect(302, `${config.email.frontendUrl}/#/dashboard`);
+        return;
+      }
       res.status(200).json({
         authenticated: true,
         user: { id: user.id, email: user.email, displayName: user.display_name }
