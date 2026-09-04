@@ -14,6 +14,7 @@ window.ApiRepository = (function(){
   const GROUPS_KEY = Storage.KEYS.groups;
   const GROUP_MEMBERS_KEY = Storage.KEYS.groupMembers;
   const USERS_KEY = Storage.KEYS.users;
+  const SETTLEMENTS_KEY = Storage.KEYS.settlements;
 
   function init(){
     // No server-side migration/seeding call needed here — authService
@@ -98,6 +99,44 @@ window.ApiRepository = (function(){
       addedBy: dto.addedBy === myUserId ? Storage.PERSONAL_USER_ID : dto.addedBy,
       paidBy: dto.paidBy === myUserId ? Storage.PERSONAL_USER_ID : dto.paidBy
     });
+  }
+
+  // ===================== Settlements (Phase 5.8) =====================
+  //
+  // Same identity-mapping convention as fromApiExpense above (and the same
+  // fix from Phase 5.7's fromApiMember): fromUserId/toUserId/createdBy are
+  // real backend user UUIDs, remapped to the local "Me" constant ONLY when
+  // they equal the caller's own real id — every other real member keeps
+  // their actual UUID untouched. Settlements only ever exist for shared
+  // groups (the Personal group has no settlements concept at all — the
+  // backend rejects it with 403, and settle-up.js's UI never offers the
+  // "Record settlement" action in Personal mode), so there's no Personal
+  // vs. shared branch to handle here, unlike expenses.
+  function fromApiSettlement(dto){
+    return Object.assign({}, dto, {
+      groupId: groupFrontendId[dto.groupId] || dto.groupId,
+      fromUserId: dto.fromUserId === myUserId ? Storage.PERSONAL_USER_ID : dto.fromUserId,
+      toUserId: dto.toUserId === myUserId ? Storage.PERSONAL_USER_ID : dto.toUserId,
+      createdBy: dto.createdBy === myUserId ? Storage.PERSONAL_USER_ID : dto.createdBy
+    });
+  }
+
+  // createdBy is deliberately NEVER included here — the backend always
+  // derives it from the authenticated session (settlementService.js), even
+  // when the caller is recording a settlement on behalf of two OTHER
+  // members (fromUserId/toUserId need not be the caller themselves — see
+  // settle-up.js's openSettlementModal, which lets any member pick any
+  // pair). Sending a client-supplied createdBy would be pointless (the
+  // server ignores it) and could be mistaken for an authoritative value,
+  // so it's left out entirely rather than sent-but-ignored.
+  function toApiSettlementPayload(item){
+    return {
+      fromUserId: toBackendUserId(item.fromUserId),
+      toUserId: toBackendUserId(item.toUserId),
+      amount: item.amount,
+      date: item.date,
+      note: item.note
+    };
   }
 
   // ===================== Groups (Phase 5.5) =====================
@@ -267,17 +306,33 @@ window.ApiRepository = (function(){
         .map(uid => ({ id: uid, displayName: knownUsers[uid].displayName, createdAt: undefined }));
       return extra.length ? localUsers.concat(extra) : localUsers;
     }
+    if(key === SETTLEMENTS_KEY){
+      // Shared groups only — never a Personal-mode call (the Personal
+      // group has no settlements concept; the backend rejects it with 403,
+      // so there's nothing useful to fetch for it here).
+      const sharedIds = await sharedFrontendGroupIds();
+      let settlements = [];
+      for(const frontendGroupId of sharedIds){
+        const body = await ApiClient.request(`/groups/${realGroupIdFor(frontendGroupId)}/settlements`, { method: 'GET' });
+        settlements = settlements.concat((body && body.settlements) || []);
+      }
+      const all = settlements.map(fromApiSettlement);
+      return all.length ? all : fallback;
+    }
     return LocalRepository.getAll(key, fallback);
   }
 
   function save(key, value){
-    if(key === EXPENSES_KEY || key === GROUPS_KEY || key === GROUP_MEMBERS_KEY){
-      // These three collections never go through whole-array save() in API
-      // mode — every mutation uses addItem/updateItem/removeItem instead
-      // (see repository.js for why re-sending a whole collection would be
-      // wrong for a REST API). Reaching here means some code path called
+    if(key === EXPENSES_KEY || key === GROUPS_KEY || key === GROUP_MEMBERS_KEY || key === SETTLEMENTS_KEY){
+      // These collections never go through whole-array save() in API mode
+      // — every mutation uses addItem/updateItem/removeItem instead (see
+      // repository.js for why re-sending a whole collection would be wrong
+      // for a REST API). Reaching here means some code path called
       // persist(key) directly instead of the item-level methods — fail
-      // loudly rather than silently re-uploading everything.
+      // loudly rather than silently re-uploading everything (this is
+      // exactly the class of bug fixed in removeGroupMember/deleteGroup
+      // during Phase 5.7 — guarding settlements here too prevents the same
+      // mistake from recurring for this collection).
       return Promise.reject(new Error(`ApiRepository.save() must not be called for ${key} — use addItem/updateItem/removeItem`));
     }
     return LocalRepository.save(key, value);
@@ -291,6 +346,19 @@ window.ApiRepository = (function(){
         : `/groups/${realGroupIdFor(item.groupId)}/expenses`;
       const body = await ApiClient.request(url, { method: 'POST', body: payload });
       return fromApiExpense(body.expense);
+    }
+    if(key === SETTLEMENTS_KEY){
+      // Defensive guard (Phase 5.8 requirement: "prevent stale group IDs
+      // from producing incorrect requests") — settle-up.js never actually
+      // offers "Record settlement" in Personal mode, but if a stale/absent
+      // groupId ever reached here regardless, fail clearly rather than
+      // silently hitting a nonsense URL.
+      if(isPersonalFrontendGroupId(item.groupId)){
+        return Promise.reject(new Error('Settlements are not supported for the Personal group'));
+      }
+      const payload = toApiSettlementPayload(item);
+      const body = await ApiClient.request(`/groups/${realGroupIdFor(item.groupId)}/settlements`, { method: 'POST', body: payload });
+      return fromApiSettlement(body.settlement);
     }
     if(key === GROUPS_KEY){
       const body = await ApiClient.request('/groups', { method: 'POST', body: { name: item.name } });

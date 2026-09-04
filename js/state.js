@@ -390,12 +390,19 @@ window.State = (function(){
     }));
   }
 
-  // ---- Settlements (Phase 4) ----
+  // ---- Settlements (Phase 4 local, Phase 5.8 cloud) ----
   async function addSettlement(settlement){
     settlement.id = Utils.uid('settle');
     settlement.createdAt = new Date().toISOString();
     data.settlements.push(settlement);
-    await persist('settlements');
+    // Phase 5.8: item-level addItem, not a whole-array persist() — mirrors
+    // addExpense's exact pattern. In API mode this posts to
+    // /groups/:groupId/settlements and merges the server-authoritative
+    // response back (createdBy is server-derived and only ever arrives
+    // this way, never sent by the client). LocalRepository.addItem already
+    // handles this generically, so local mode is unaffected.
+    const authoritative = await repository.addItem(S.KEYS.settlements, settlement);
+    if(authoritative) Object.assign(settlement, authoritative);
     notify();
     return settlement;
   }

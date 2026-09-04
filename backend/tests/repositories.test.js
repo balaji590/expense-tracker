@@ -130,8 +130,8 @@ describe('Repositories', () => {
     const friend = await userRepo.create({ email: 'settle-friend@example.com', displayName: 'Friend' });
     const group = await groupRepo.create({ name: 'Settle Test', type: 'shared', createdBy: owner.id });
 
-    await settlementRepo.create({ groupId: group.id, fromUserId: friend.id, toUserId: owner.id, amountPaise: 50000, date: '2026-08-01' });
-    await settlementRepo.create({ groupId: group.id, fromUserId: friend.id, toUserId: owner.id, amountPaise: 30000, date: '2026-08-10' });
+    await settlementRepo.create({ groupId: group.id, fromUserId: friend.id, toUserId: owner.id, amountPaise: 50000, date: '2026-08-01', createdBy: friend.id });
+    await settlementRepo.create({ groupId: group.id, fromUserId: friend.id, toUserId: owner.id, amountPaise: 30000, date: '2026-08-10', createdBy: friend.id });
 
     const list = await settlementRepo.listForGroup(group.id);
     assert.equal(list.length, 2);

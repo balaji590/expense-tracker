@@ -173,8 +173,8 @@ describe('Schema constraints', () => {
     const group = await makeGroup(owner.id);
     await assert.rejects(
       () => db.query(
-        `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date)
-         VALUES ($1, $2, $2, $3, $4)`,
+        `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date, created_by)
+         VALUES ($1, $2, $2, $3, $4, $2)`,
         [group.id, owner.id, 500, '2026-08-01']
       ),
       /violates check constraint/
@@ -187,8 +187,8 @@ describe('Schema constraints', () => {
     const group = await makeGroup(owner.id);
     await assert.rejects(
       () => db.query(
-        `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date)
-         VALUES ($1, $2, $3, $4, $5)`,
+        `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $2)`,
         [group.id, owner.id, member.id, -100, '2026-08-01']
       ),
       /violates check constraint/
@@ -211,8 +211,8 @@ describe('Schema constraints', () => {
       [group.id, 'invitee2@example.com', owner.id, `hash-${Math.random()}`]
     );
     await db.query(
-      `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date)
-       VALUES ($1, $2, $3, $4, $5)`,
+      `INSERT INTO settlements (group_id, from_user_id, to_user_id, amount_paise, date, created_by)
+       VALUES ($1, $2, $3, $4, $5, $2)`,
       [group.id, owner.id, member.id, 500, '2026-08-01']
     );
 
